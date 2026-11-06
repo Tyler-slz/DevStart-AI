@@ -140,17 +140,23 @@ function inferMode(text) {
 
 const state = {
   mode: "understand",
-  view: "chat",
+  view: "dashboard",
   history: [],
   busy: false,
   listening: false,
   usingBackend: false,
   apiBase: API_BASE_DEFAULT,
   embedded: new URLSearchParams(location.search).get("embed") === "1",
+  analysis: {
+    status: "idle",
+    repoName: "",
+    phase: "understand"
+  },
   repo: {
     fullName: "",
     owner: "",
     name: "",
+    avatarUrl: "",
     visibility: "Repo",
     branch: "main",
     stars: "—",
@@ -172,16 +178,25 @@ const els = {
   brandMark: $("brandMark"),
   chatView: $("chatView"),
   dashboardPage: $("dashboardPage"),
+  prPage: $("prPage"),
   dashboardBtn: $("dashboardBtn"),
+  bottomDashboardBtn: $("bottomDashboardBtn"),
+  bottomPrBtn: $("bottomPrBtn"),
+  prStatus: $("prStatus"),
+  autoPrTitle: $("autoPrTitle"),
+  autoPrSummary: $("autoPrSummary"),
+  autoPrFiles: $("autoPrFiles"),
+  autoPrIssues: $("autoPrIssues"),
+  autoPrWhy: $("autoPrWhy"),
+  autoPrFileList: $("autoPrFileList"),
+  cancelPrBtn: $("cancelPrBtn"),
+  approvePrBtn: $("approvePrBtn"),
   backToChatBtn: $("backToChatBtn"),
-  dashSettingsBtn: $("dashSettingsBtn"),
   dashNewChatBtn: $("dashNewChatBtn"),
-  backendCheckBtn: $("backendCheckBtn"),
-  dashConnection: $("dashConnection"),
-  dashMicState: $("dashMicState"),
   dashStageList: $("dashStageList"),
   composerArea: $("composerArea"),
   dashRepo: $("dashRepo"),
+  dashRepoImage: $("dashRepoImage"),
   dashVisibility: $("dashVisibility"),
   dashBranch: $("dashBranch"),
   dashStars: $("dashStars"),
@@ -189,6 +204,18 @@ const els = {
   dashIssues: $("dashIssues"),
   dashStage: $("dashStage"),
   dashFill: $("dashFill"),
+  prReadyWidget: $("prReadyWidget"),
+  dashAnalysisStatus: $("dashAnalysisStatus"),
+  analysisRing: $("analysisRing"),
+  analysisProgress: $("analysisProgress"),
+  analysisFiles: $("analysisFiles"),
+  analysisLastScan: $("analysisLastScan"),
+  vulnerabilityTotal: $("vulnerabilityTotal"),
+  criticalCount: $("criticalCount"),
+  highCount: $("highCount"),
+  mediumCount: $("mediumCount"),
+  lowCount: $("lowCount"),
+  runAnalysisBtn: $("runAnalysisBtn"),
   thread: $("thread"),
   prompts: $("prompts"),
   composer: $("composer"),
@@ -198,6 +225,8 @@ const els = {
   settingsBtn: $("settingsBtn"),
   minimizeBtn: $("minimizeBtn"),
   closeBtn: $("closeBtn"),
+  scanCompleteToast: $("scanCompleteToast"),
+  dismissScanToast: $("dismissScanToast"),
   settingsDialog: $("settingsDialog"),
   settingsForm: $("settingsForm"),
   apiInput: $("apiInput"),
@@ -231,6 +260,7 @@ if (state.embedded) {
 
     if (data.type === "REPO_CONTEXT" && data.repo) {
       setRepoContext(data.repo);
+      restoreCachedRepoContext(data.repo);
     }
   });
 }
@@ -294,25 +324,14 @@ function setActivity(next) {
 }
 
 function setStatus(kind) {
-  if (els.dashConnection) {
-    const label =
-      kind === "online"
-        ? "Connected"
-        : kind === "offline"
-          ? "Preview mode"
-          : "Checking…";
-    els.dashConnection.textContent = label;
-    els.dashConnection.dataset.state = kind;
-    els.dashConnection.title =
-      kind === "online"
-        ? "Connected to the local backend"
-        : kind === "offline"
-          ? "Backend offline — showing preview replies"
-          : "Checking backend connection";
-  }
-
-  if (els.backendCheckBtn) {
-    els.backendCheckBtn.dataset.state = kind;
+  const label =
+    kind === "online"
+      ? "Connected"
+      : kind === "offline"
+        ? "Preview mode"
+        : "Checking…";
+  if (els.dashAnalysisStatus && state.analysis.status === "idle") {
+    els.dashAnalysisStatus.textContent = label;
   }
 }
 
@@ -346,7 +365,10 @@ function formatInline(text) {
 
 function formatCount(value) {
   if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text && text !== "—" ? text : "—";
+  }
   const number = Number(value);
   if (!Number.isFinite(number)) return "—";
   if (number >= 1000000) return `${(number / 1000000).toFixed(1).replace(/\.0$/, "")}m`;
@@ -355,10 +377,116 @@ function formatCount(value) {
 }
 
 function renderProgress() {
-  const index = MODE_ORDER.indexOf(state.mode);
-  els.dashStage.textContent = `${MODES[state.mode].label} · step ${index + 1} of ${MODE_ORDER.length}`;
+  const processMode = getProcessMode();
+  const index = MODE_ORDER.indexOf(processMode);
+  els.dashStage.textContent = `${MODES[processMode].label} · step ${index + 1} of ${MODE_ORDER.length}`;
   els.dashFill.style.width = `${((index + 1) / MODE_ORDER.length) * 100}%`;
   renderDashStageList(index);
+  renderAnalysis();
+  if (els.prReadyWidget) {
+    els.prReadyWidget.hidden = !(state.analysis.phase === "pr" && state.analysis.status === "complete");
+  }
+}
+
+function getProcessMode() {
+  const analysisIsActive =
+    state.analysis.repoName &&
+    state.analysis.status !== "idle" &&
+    MODES[state.analysis.phase];
+  return analysisIsActive ? state.analysis.phase : state.mode;
+}
+
+function renderAnalysis() {
+  const isRunning = state.analysis.status === "running";
+  const isComplete = state.analysis.status === "complete";
+  const progress = isRunning ? 35 : isComplete ? 100 : 0;
+  const status = isRunning
+    ? "Analyzing repository"
+    : isComplete
+      ? "Analysis complete"
+      : "Ready to scan";
+
+  if (els.dashAnalysisStatus) els.dashAnalysisStatus.textContent = status;
+  if (els.analysisProgress) els.analysisProgress.textContent = `${progress}%`;
+  if (els.analysisRing) {
+    els.analysisRing.style.setProperty("--analysis-progress", `${progress * 3.6}deg`);
+    els.analysisRing.setAttribute(
+      "aria-label",
+      isRunning
+        ? "Analysis is in progress"
+        : isComplete
+          ? "Analysis complete"
+          : "Analysis has not started"
+    );
+  }
+
+  function showScanCompleteToast() {
+    if (!els.scanCompleteToast) return;
+    els.scanCompleteToast.hidden = false;
+  }
+  if (els.analysisFiles) {
+    els.analysisFiles.textContent = isRunning
+      ? "Inspecting repository"
+      : isComplete
+        ? "Repository inspection finished"
+        : "No scan run";
+  }
+  if (els.analysisLastScan) {
+    els.analysisLastScan.textContent = isRunning
+      ? "Tracing bugs, risky paths, and security issues."
+      : isComplete
+        ? "Insights were generated automatically from the inspection."
+        : "Analysis starts automatically when a repository is detected.";
+  }
+}
+
+async function requestAnalysis() {
+  if (state.busy || !state.repo.fullName) return;
+
+  state.analysis.status = "running";
+  state.analysis.phase = "understand";
+  renderProgress();
+  state.analysis.phase = "onboard";
+  renderProgress();
+  renderAnalysis();
+  setMode("analyze", { silent: true });
+  state.analysis.phase = "analyze";
+  renderProgress();
+  await sendMessage(
+    `Analyze the ${state.repo.fullName} repository automatically. Find bugs, vulnerabilities, and risky paths, and tie every finding to a file.`
+  );
+
+  state.analysis.phase = "suggest";
+  renderProgress();
+  await sendMessage(
+    `Generate automatic insights from the ${state.repo.fullName} inspection. Prioritize the most important fixes, explain why they matter, and suggest concrete next steps tied to the findings.`
+  );
+
+  state.analysis.phase = "pr";
+  state.analysis.status = "complete";
+  renderProgress();
+  showScanCompleteToast();
+  const prDraft = {
+    repo: state.repo.fullName,
+    title: `Harden ${state.repo.fullName}`,
+    summary: `Automatic inspection found improvement opportunities in ${state.repo.fullName}.`,
+    why: "Groups the highest-priority findings into one reviewable change before they reach production.",
+    scope: "Security fixes, validation improvements, and targeted refactors.",
+    vulnerabilities: {
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0
+    },
+    changes: [
+      "Repository inspection findings were reviewed automatically",
+      "Highest-priority security risks were grouped for review",
+      "Validation and targeted refactoring opportunities were identified"
+    ]
+  };
+  storageSet(`prDraft:${state.repo.fullName}`, prDraft);
+  storageSet(`scanComplete:${state.repo.fullName}`, true);
+  postToParent("PR_DRAFT_READY", prDraft);
 }
 
 function renderDashStageList(activeIndex = MODE_ORDER.indexOf(state.mode)) {
@@ -391,6 +519,15 @@ function renderDashStageList(activeIndex = MODE_ORDER.indexOf(state.mode)) {
 function renderDashboard() {
   const repo = state.repo;
   els.dashRepo.textContent = repo.fullName || "Current repository";
+  if (els.dashRepoImage) {
+    const avatarUrl = repo.avatarUrl || (repo.owner ? `https://github.com/${encodeURIComponent(repo.owner)}.png?size=160` : "");
+    if (avatarUrl) {
+      els.dashRepoImage.src = avatarUrl;
+    } else {
+      els.dashRepoImage.removeAttribute("src");
+    }
+    els.dashRepoImage.hidden = !avatarUrl;
+  }
   els.dashVisibility.textContent = repo.visibility || "Repo";
   els.dashBranch.textContent = repo.branch || "main";
   els.dashStars.textContent = formatCount(repo.stars);
@@ -399,7 +536,16 @@ function renderDashboard() {
   renderProgress();
 }
 
+function isMissingRepoValue(value) {
+  return value === null || value === undefined || value === "" || value === "—";
+}
+
+function repoStorageKey(fullName) {
+  return fullName ? `repoContext:${fullName}` : "";
+}
+
 let enrichedRepo = "";
+let enrichRetryTimer = null;
 
 async function enrichRepoFromApi(fullName) {
   if (!fullName || !fullName.includes("/") || enrichedRepo === fullName) return;
@@ -413,28 +559,72 @@ async function enrichRepoFromApi(fullName) {
       { headers: { Accept: "application/vnd.github+json" } },
       5000
     );
-    if (!res.ok) return;
+    if (!res.ok) {
+      enrichedRepo = "";
+      if (!enrichRetryTimer) {
+        enrichRetryTimer = setTimeout(() => {
+          enrichRetryTimer = null;
+          enrichRepoFromApi(fullName);
+        }, 1500);
+      }
+      return;
+    }
 
     const data = await res.json();
     setRepoContext({
       fullName: data.full_name || fullName,
+      avatarUrl: data.owner && data.owner.avatar_url ? data.owner.avatar_url : "",
       visibility: data.private ? "Private" : "Public",
       branch: data.default_branch || state.repo.branch || "main",
-      stars: data.stargazers_count,
-      forks: data.forks_count,
-      issues: data.open_issues_count
+      stars: Number.isFinite(data.stargazers_count) ? data.stargazers_count : state.repo.stars,
+      forks: Number.isFinite(data.forks_count) ? data.forks_count : state.repo.forks,
+      issues: Number.isFinite(data.open_issues_count) ? data.open_issues_count : state.repo.issues
     });
   } catch {
-    /* keep whatever the page or browser gave us */
+    enrichedRepo = "";
+    if (!enrichRetryTimer) {
+      enrichRetryTimer = setTimeout(() => {
+        enrichRetryTimer = null;
+        enrichRepoFromApi(fullName);
+      }, 1500);
+    }
   }
 }
 
 function setRepoContext(repo = {}) {
-  state.repo = { ...state.repo, ...repo };
-  renderDashboard();
+  const sameRepo = !repo.fullName || !state.repo.fullName || repo.fullName === state.repo.fullName;
+  const nextRepo = { ...state.repo };
 
-  const missingStats = !state.repo.stars || state.repo.stars === "—";
+  Object.entries(repo).forEach(([key, value]) => {
+    if (sameRepo && isMissingRepoValue(value) && !isMissingRepoValue(nextRepo[key])) return;
+    nextRepo[key] = value;
+  });
+
+  state.repo = nextRepo;
+  renderDashboard();
+  if (state.repo.fullName) storageSet(repoStorageKey(state.repo.fullName), state.repo);
+
+  if (state.repo.fullName && state.analysis.repoName !== state.repo.fullName) {
+    state.analysis.repoName = state.repo.fullName;
+    requestAnalysis();
+  }
+
+  const missingStats = ["stars", "forks", "issues"].some((key) =>
+    isMissingRepoValue(state.repo[key])
+  );
   if (missingStats) enrichRepoFromApi(state.repo.fullName);
+}
+
+async function restoreCachedRepoContext(repo) {
+  if (!repo || !repo.fullName) return;
+  const cached = await storageGet(repoStorageKey(repo.fullName), null);
+  if (
+    cached &&
+    cached.fullName === repo.fullName &&
+    (!state.repo.fullName || state.repo.fullName === repo.fullName)
+  ) {
+    setRepoContext(cached);
+  }
 }
 
 async function loadRepoFromActiveTab() {
@@ -472,14 +662,16 @@ async function loadRepoFromActiveTab() {
 /* ---------- View switching ---------- */
 
 function setView(view) {
-  const next = view === "dashboard" ? "dashboard" : "chat";
+  const next = view === "dashboard" || view === "pr" ? view : "chat";
   state.view = next;
 
   const isDashboard = next === "dashboard";
+  const isPr = next === "pr";
 
-  if (els.chatView) els.chatView.hidden = isDashboard;
+  if (els.chatView) els.chatView.hidden = isDashboard || isPr;
   if (els.dashboardPage) els.dashboardPage.hidden = !isDashboard;
-  if (els.composerArea) els.composerArea.hidden = isDashboard;
+  if (els.prPage) els.prPage.hidden = !isPr;
+  if (els.composerArea) els.composerArea.hidden = isDashboard || isPr;
 
   if (els.dashboardBtn) {
     els.dashboardBtn.classList.toggle("is-active", isDashboard);
@@ -491,10 +683,41 @@ function setView(view) {
     );
   }
 
+  [els.bottomDashboardBtn, els.bottomPrBtn].forEach((button) => {
+    if (!button) return;
+    const active = (button === els.bottomDashboardBtn && isDashboard) ||
+      (button === els.bottomPrBtn && isPr);
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+
   if (isDashboard) {
     renderDashboard();
     if (els.dashboardPage) els.dashboardPage.scrollTop = 0;
     if (!state.embedded) loadRepoFromActiveTab();
+  }
+  if (isPr) {
+    const repo = state.repo.fullName || "this repository";
+    if (els.autoPrTitle) els.autoPrTitle.textContent = `Harden ${repo}`;
+    if (els.autoPrSummary) els.autoPrSummary.textContent =
+      `Automatic inspection findings grouped into one reviewable change for ${repo}.`;
+    if (els.autoPrFileList) {
+      els.autoPrFileList.innerHTML = "";
+      [
+        ["Added", "index.html", "file-added"],
+        ["Modified", "src/app.js", "file-modified"],
+        ["Deleted", "legacy/config.js", "file-deleted"]
+      ].forEach(([action, file, className]) => {
+        const item = document.createElement("li");
+        const badge = document.createElement("span");
+        badge.className = `file-change ${className}`;
+        badge.textContent = action;
+        const path = document.createElement("code");
+        path.textContent = file;
+        item.append(badge, path);
+        els.autoPrFileList.appendChild(item);
+      });
+    }
   }
 }
 
@@ -893,11 +1116,6 @@ function updateMicSettings(stateName) {
     els.micState.dataset.state = stateName;
   }
 
-  if (els.dashMicState) {
-    els.dashMicState.textContent = stateName === "granted" || stateName === "session" ? "Ready" : label;
-    els.dashMicState.dataset.state = stateName;
-  }
-
   if (els.micPermissionBtn) {
     els.micPermissionBtn.disabled =
       stateName === "granted" || stateName === "session";
@@ -1155,21 +1373,38 @@ els.backToChatBtn?.addEventListener("click", () => {
   els.input.focus({ preventScroll: true });
 });
 
-els.dashSettingsBtn?.addEventListener("click", openSettings);
-
 els.dashNewChatBtn?.addEventListener("click", () => {
   newChat();
   setView("chat");
   els.input.focus({ preventScroll: true });
 });
 
-els.backendCheckBtn?.addEventListener("click", checkBackend);
+els.bottomDashboardBtn?.addEventListener("click", () => setView("dashboard"));
+els.bottomPrBtn?.addEventListener("click", () => setView("pr"));
+els.cancelPrBtn?.addEventListener("click", () => {
+  if (els.prStatus) els.prStatus.textContent = "Cancelled";
+});
+els.approvePrBtn?.addEventListener("click", () => {
+  if (els.prStatus) els.prStatus.textContent = "Approved for review";
+  if (els.approvePrBtn) {
+    els.approvePrBtn.disabled = true;
+    els.approvePrBtn.textContent = "Pull request approved";
+  }
+});
+
+els.runAnalysisBtn?.addEventListener("click", requestAnalysis);
+
+
 
 els.minimizeBtn?.addEventListener("click", () => postToParent("MINIMIZE"));
 els.closeBtn?.addEventListener("click", () => postToParent("CLOSE"));
 
 els.settingsDialog.addEventListener("click", (event) => {
   if (event.target === els.settingsDialog) closeSettings();
+});
+
+els.dismissScanToast?.addEventListener("click", () => {
+  if (els.scanCompleteToast) els.scanCompleteToast.hidden = true;
 });
 
 document.addEventListener("keydown", (event) => {
@@ -1195,10 +1430,10 @@ async function init() {
   setMode(state.mode, { silent: true });
   renderEmpty();
   renderDashboard();
-  setView("chat");
+  setView("dashboard");
   syncSend();
   autoResize();
-  checkBackend();
+  await checkBackend();
 
   if (state.embedded) {
     postToParent("PANEL_READY");

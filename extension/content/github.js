@@ -44,16 +44,15 @@
   let launcher = null;
   let shell = null;
   let frame = null;
+  let pullRequestCard = null;
+  let prContainer = null;
+  let scanCompleteNotice = null;
+  let prToggle = null;
+  let prExpanded = false;
   let lastRepoKey = "";
   let mounted = false;
-
-  function extensionOrigin() {
-    try {
-      return new URL(chrome.runtime.getURL("")).origin;
-    } catch {
-      return "";
-    }
-  }
+  let closeTimer = null;
+  let mountObserver = null;
 
   function readRepo() {
     const meta = document.querySelector('meta[name="octolytics-dimension-repository_nwo"]');
@@ -62,6 +61,17 @@
     let fullName = meta && meta.content ? meta.content : "";
     if (!fullName && parts.length >= 2 && !RESERVED_ROOTS.has(parts[0])) {
       fullName = `${parts[0]}/${parts[1]}`;
+    }
+
+    function readMetric(selectors) {
+      for (const selector of selectors) {
+        const text = readText(selector);
+        if (!text) continue;
+        const match = text.match(/(\d[\d,.]*)(?:\s|$)/);
+        if (match) return match[1].replace(/,/g, "");
+        if (/^(star|fork|issue)s?$/i.test(text)) return "0";
+      }
+      return "";
     }
 
     if (!fullName || !fullName.includes("/")) return null;
@@ -76,9 +86,23 @@
       fullName: `${owner}/${name}`,
       visibility,
       branch: readBranch(),
-      stars: readText("#repo-stars-counter-star") || "—",
-      forks: readText("#repo-network-counter") || "—",
-      issues: readText("#issues-repo-tab-count") || "—"
+      stars: readMetric([
+        "#repo-stars-counter-star",
+        'a[href$="/stargazers"]',
+        'a[href*="/stargazers"]',
+        '[aria-label*="star" i]'
+      ]) || "—",
+      forks: readMetric([
+        "#repo-network-counter",
+        'a[href*="/network/members"]',
+        '[aria-label*="fork" i]'
+      ]) || "—",
+      issues: readMetric([
+        "#issues-repo-tab-count",
+        'a[href$="/issues"]',
+        'a[href*="/issues"]',
+        '[aria-label*="issue" i]'
+      ]) || "—"
     };
   }
 
@@ -108,14 +132,32 @@
 
     host = document.createElement("div");
     host.id = HOST_ID;
+    host.style.cssText =
+      "position:fixed;inset:0;z-index:2147483000;pointer-events:none;";
 
     launcher = document.createElement("button");
     launcher.type = "button";
     launcher.className = "devstart-launcher";
     launcher.setAttribute("aria-label", "Open DevStart AI repository assistant");
     launcher.innerHTML =
-      '<span class="devstart-mark" aria-hidden="true"></span><span>DevStart AI</span>';
-    launcher.addEventListener("click", openPanel);
+      '<span class="devstart-mark" aria-hidden="true"></span>' +
+      '<span>DevStart AI</span><span class="devstart-analysis-label">Analysis</span>' +
+      '<span class="devstart-analysis-chevron" aria-hidden="true">⌃</span>';
+    launcher.addEventListener("click", () => {
+      if (prContainer && !prContainer.hidden && pullRequestCard && pullRequestCard.childElementCount) {
+        prExpanded = !prExpanded;
+        pullRequestCard.hidden = !prExpanded;
+        launcher.setAttribute("aria-expanded", String(prExpanded));
+        launcher.setAttribute(
+          "aria-label",
+          prExpanded ? "Collapse vulnerability analysis" : "Expand vulnerability analysis"
+        );
+        const chevron = launcher.querySelector(".devstart-analysis-chevron");
+        if (chevron) chevron.textContent = prExpanded ? "⌄" : "⌃";
+        return;
+      }
+      openPanel();
+    });
 
     shell = document.createElement("div");
     shell.className = "devstart-shell";
@@ -127,20 +169,226 @@
     frame.addEventListener("load", sendContext);
 
     shell.appendChild(frame);
-    host.append(launcher, shell);
-    document.documentElement.appendChild(host);
+    pullRequestCard = document.createElement("section");
+    pullRequestCard.className = "devstart-pr-card";
+    pullRequestCard.dataset.devstartPrWidget = "true";
+    pullRequestCard.setAttribute("aria-labelledby", "devstart-pr-title");
+    prContainer = document.createElement("span");
+    prContainer.className = "devstart-pr-container";
+    prContainer.hidden = true;
+
+    scanCompleteNotice = document.createElement("aside");
+    scanCompleteNotice.className = "devstart-scan-notice";
+    scanCompleteNotice.hidden = true;
+    scanCompleteNotice.setAttribute("role", "status");
+
+    prToggle = document.createElement("button");
+    prToggle.type = "button";
+    prToggle.className = "devstart-pr-toggle";
+    prToggle.textContent = "Vulnerability issues";
+    prToggle.setAttribute("aria-expanded", "false");
+    prToggle.setAttribute("aria-label", "Show automated pull request");
+    prToggle.addEventListener("click", () => {
+      prExpanded = !prExpanded;
+      prToggle.setAttribute("aria-expanded", String(prExpanded));
+      const total = prToggle.dataset.total || "0";
+      prToggle.textContent = prExpanded
+        ? `Hide vulnerability issues ${total} ▲`
+        : `Vulnerability issues ${total} ▼`;
+      prToggle.setAttribute(
+        "aria-label",
+        prExpanded ? "Hide vulnerability issues" : "Show vulnerability issues"
+      );
+      if (pullRequestCard) pullRequestCard.hidden = !prExpanded;
+    });
+
+    prContainer.append(prToggle, pullRequestCard);
+    host.append(scanCompleteNotice, prContainer, launcher, shell);
+    (document.body || document.documentElement).appendChild(host);
+    mountPrToggle();
     mounted = true;
+    mountObserver = new MutationObserver(() => {
+      if (!host || !host.isConnected) {
+        mounted = false;
+        ensureUI();
+      } else {
+        mountPrToggle();
+      }
+    });
+    mountObserver.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  function mountPullRequestCard() {
+    if (!pullRequestCard) return;
+    pullRequestCard.hidden = !prExpanded;
+  }
+
+  function mountPrToggle() {
+    if (!prToggle || !host) return;
+    if (prContainer.parentElement !== host) {
+      host.appendChild(prContainer);
+    }
+  }
+
+  function retryHeaderMount(repo) {
+    [100, 500, 1200, 2500].forEach((delay) => {
+      setTimeout(() => {
+        const currentRepo = readRepo();
+        if (currentRepo && currentRepo.fullName === repo) {
+          mountPrToggle();
+          restoreCompletedScan(repo);
+        }
+      }, delay);
+    });
+  }
+
+  function showPullRequest(data) {
+    if (!pullRequestCard) return;
+    mountPrToggle();
+    prContainer.hidden = false;
+    prExpanded = false;
+    pullRequestCard.innerHTML = "";
+
+    const header = document.createElement("div");
+    header.className = "devstart-pr-head";
+    const heading = document.createElement("div");
+    const kicker = document.createElement("span");
+    kicker.className = "devstart-pr-kicker";
+    kicker.textContent = "DevStart AI · Repository scan";
+    const title = document.createElement("h2");
+    title.id = "devstart-pr-title";
+    title.textContent = "Vulnerability issues";
+    heading.append(kicker, title);
+    const badge = document.createElement("span");
+    badge.className = "devstart-pr-badge";
+    badge.textContent = "Scanned";
+    header.append(heading, badge);
+
+    const summary = document.createElement("p");
+    summary.className = "devstart-pr-summary";
+    const counts = data.vulnerabilities || {};
+    const total = ["critical", "high", "medium", "low"].reduce(
+      (sum, key) => sum + (Number.isFinite(counts[key]) ? counts[key] : 0),
+      0
+    );
+    prToggle.textContent = `Vulnerability issues ${total}`;
+    prToggle.dataset.total = String(total);
+    prToggle.setAttribute("aria-expanded", "false");
+    prToggle.setAttribute("aria-label", "Show vulnerability issues");
+    launcher.innerHTML =
+      `<span class="devstart-mark" aria-hidden="true"></span>` +
+      `<span>DevStart AI</span><span class="devstart-analysis-label">Analysis</span>` +
+      `<span class="devstart-analysis-chevron" aria-hidden="true">⌃</span>`;
+    launcher.setAttribute("aria-expanded", "false");
+    launcher.setAttribute("aria-label", "Expand vulnerability analysis");
+    summary.textContent = `Scanned: ${total} vulnerability issue${total === 1 ? "" : "s"}`;
+    const severityGrid = document.createElement("div");
+    severityGrid.className = "devstart-vulnerability-grid";
+    [
+      ["Critical", counts.critical],
+      ["High", counts.high],
+      ["Medium", counts.medium],
+      ["Low", counts.low]
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.className = `devstart-vulnerability-item severity-${label.toLowerCase()}`;
+      const valueText = document.createElement("strong");
+      valueText.textContent = String(Number.isFinite(value) ? value : 0);
+      const labelText = document.createElement("span");
+      labelText.textContent = label;
+      item.append(valueText, labelText);
+      severityGrid.appendChild(item);
+    });
+
+    const detailsToggle = document.createElement("button");
+    detailsToggle.type = "button";
+    detailsToggle.className = "devstart-pr-expand";
+    detailsToggle.textContent = "Expand scan details +";
+    detailsToggle.setAttribute("aria-expanded", "false");
+
+    const details = document.createElement("div");
+    details.className = "devstart-pr-details";
+    details.hidden = true;
+    detailsToggle.addEventListener("click", () => {
+      details.hidden = !details.hidden;
+      detailsToggle.textContent = details.hidden ? "Expand scan details +" : "Hide scan details −";
+      detailsToggle.setAttribute("aria-expanded", String(!details.hidden));
+    });
+    [
+      ["Why this change", data.why],
+      ["Proposed scope", data.scope]
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      const itemLabel = document.createElement("span");
+      itemLabel.className = "devstart-pr-label";
+      itemLabel.textContent = label;
+      const itemText = document.createElement("p");
+      itemText.textContent = value || "";
+      item.append(itemLabel, itemText);
+      details.appendChild(item);
+    });
+
+    pullRequestCard.append(header, summary, severityGrid, detailsToggle, details);
+    pullRequestCard.hidden = !prExpanded;
+    mountPullRequestCard();
+    mountPrToggle();
+
+    showScanCompleteNotice(data.repo);
+  }
+
+  function showScanCompleteNotice(repo) {
+    if (!scanCompleteNotice || !repo) return;
+    const [owner, name] = repo.split("/");
+    if (!owner || !name) return;
+
+    scanCompleteNotice.innerHTML = "";
+    const copy = document.createElement("span");
+    copy.textContent = "Automated PR is complete. Please check.";
+    const link = document.createElement("a");
+    link.href = `/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/pulls`;
+    link.textContent = "Go to Pull Request";
+    link.setAttribute("aria-label", "Go to Pull Requests");
+    scanCompleteNotice.append(copy, link);
+    scanCompleteNotice.hidden = false;
+  }
+
+  function restoreStoredPrDraft(repo) {
+    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local || !repo) return;
+    const key = `prDraft:${repo}`;
+    chrome.storage.local.get([key], (result) => {
+      if (chrome.runtime && chrome.runtime.lastError) return;
+      const draft = result && result[key];
+      const currentRepo = readRepo();
+      if (draft && currentRepo && currentRepo.fullName === repo) showPullRequest(draft);
+    });
+  }
+
+  function restoreCompletedScan(repo) {
+    if (typeof chrome === "undefined" || !chrome.storage || !chrome.storage.local || !repo) return;
+    const keys = [`prDraft:${repo}`, `scanComplete:${repo}`];
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime && chrome.runtime.lastError) return;
+      const currentRepo = readRepo();
+      if (!currentRepo || currentRepo.fullName !== repo) return;
+      const draft = result && result[`prDraft:${repo}`];
+      if (result && result[`scanComplete:${repo}`] && draft) showPullRequest(draft);
+    });
   }
 
   function openPanel() {
     if (!readRepo()) return;
     ensureUI();
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = null;
+    }
     if (!frame.src) {
       frame.src = chrome.runtime.getURL("sidepanel/sidepanel.html?embed=1");
     }
 
     shell.hidden = false;
     launcher.hidden = true;
+    shell.classList.remove("is-closing");
 
     requestAnimationFrame(() => {
       if (shell) shell.classList.add("is-open");
@@ -157,10 +405,14 @@
 
   function closePanel() {
     if (!shell) return;
+    if (closeTimer) clearTimeout(closeTimer);
     shell.classList.remove("is-open");
+    shell.classList.add("is-closing");
     if (launcher) launcher.hidden = false;
-    setTimeout(() => {
+    closeTimer = setTimeout(() => {
       if (shell && !shell.classList.contains("is-open")) shell.hidden = true;
+      if (shell) shell.classList.remove("is-closing");
+      closeTimer = null;
     }, 220);
   }
 
@@ -194,13 +446,23 @@
   }
 
   function unmount() {
+    if (prContainer && prContainer.isConnected) prContainer.remove();
     if (host && host.isConnected) host.remove();
     host = null;
     launcher = null;
     shell = null;
     frame = null;
+    pullRequestCard = null;
+    prContainer = null;
+    scanCompleteNotice = null;
+    prToggle = null;
+    prExpanded = false;
     mounted = false;
     lastRepoKey = "";
+    if (closeTimer) clearTimeout(closeTimer);
+    closeTimer = null;
+    if (mountObserver) mountObserver.disconnect();
+    mountObserver = null;
   }
 
   function boot() {
@@ -215,26 +477,48 @@
 
     if (repo.fullName !== lastRepoKey) {
       lastRepoKey = repo.fullName;
+      prExpanded = false;
+      if (prToggle) {
+        prToggle.textContent = "Vulnerability issues ▼";
+        prToggle.setAttribute("aria-expanded", "false");
+      }
+      if (pullRequestCard) pullRequestCard.innerHTML = "";
+      if (prContainer) prContainer.hidden = true;
       sendContext();
     }
+    restoreCompletedScan(repo.fullName);
+    retryHeaderMount(repo.fullName);
 
     maybeAutoOpen();
   }
 
   // Messages from the embedded panel
   window.addEventListener("message", (event) => {
-    const expectedOrigin = extensionOrigin();
-    if (!expectedOrigin || event.origin !== expectedOrigin) return;
-
     const data = event.data;
     if (!data || data.source !== "devstart-panel") return;
+    if (!frame || event.source !== frame.contentWindow) return;
 
     if (data.type === "CLOSE" || data.type === "MINIMIZE") {
       closePanel();
+    } else if (data.type === "PR_DRAFT_READY") {
+      showPullRequest(data);
     } else if (data.type === "PANEL_READY") {
       sendContext();
     }
   });
+
+  if (chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+      const repo = readRepo();
+      if (!repo) return;
+      const change = changes[`prDraft:${repo.fullName}`];
+      if (change && change.newValue) showPullRequest(change.newValue);
+      if (changes[`scanComplete:${repo.fullName}`] && changes[`scanComplete:${repo.fullName}`].newValue) {
+        restoreCompletedScan(repo.fullName);
+      }
+    });
+  }
 
   // Toolbar action toggles the on-page assistant when it is available
   if (chrome.runtime && chrome.runtime.onMessage) {
@@ -248,6 +532,12 @@
   document.addEventListener("turbo:load", boot);
   document.addEventListener("pjax:end", boot);
   window.addEventListener("popstate", boot);
+  window.addEventListener("hashchange", boot);
+  window.addEventListener("pageshow", boot);
+  document.addEventListener("DOMContentLoaded", boot, { once: true });
 
   boot();
+  setTimeout(boot, 250);
+  setTimeout(boot, 1000);
+  setTimeout(boot, 2500);
 })();

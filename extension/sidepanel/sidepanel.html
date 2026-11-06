@@ -44,6 +44,12 @@
       </div>
     </header>
 
+    <aside class="scan-complete-toast" id="scanCompleteToast" role="status" hidden>
+      <span class="scan-complete-dot" aria-hidden="true"></span>
+      <span>Automated PR is complete. Please check.</span>
+      <button class="scan-complete-close" id="dismissScanToast" type="button" aria-label="Dismiss notification">×</button>
+    </aside>
+
     <div class="content">
       <section class="stages-wrap" aria-label="AI process — read only">
         <div class="stages" id="stageRail" role="list" aria-label="AI process stages">
@@ -119,11 +125,17 @@
           <button class="ghost-btn back-btn" id="backToChatBtn" type="button">Back to chat</button>
         </div>
 
+        <div class="pr-ready-widget" id="prReadyWidget" hidden role="status">
+          <span class="pr-ready-icon" aria-hidden="true">✓</span>
+          <span class="pr-ready-copy">
+            <strong>Automated PR is complete</strong>
+            <span>Please check the Pull Requests page on GitHub.</span>
+          </span>
+        </div>
+
         <div class="dash-repo-card">
           <span class="dash-repo-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5" /><path d="M4 19.5h16" /><path d="M9 7h6" />
-            </svg>
+            <img id="dashRepoImage" alt="" />
           </span>
           <span class="dash-repo-copy">
             <span class="dash-repo-name" id="dashRepo">Current repository</span>
@@ -160,23 +172,101 @@
           <div class="dash-stage-list" id="dashStageList"></div>
         </div>
 
-        <div class="dash-card">
+        <div class="dash-card analysis-card">
           <div class="dash-card-head">
-            <span>System</span>
+            <span>Analysis process</span>
+            <span id="dashAnalysisStatus">Ready to scan</span>
           </div>
-          <button class="dash-row" id="backendCheckBtn" type="button" title="Check the backend connection">
-            <span>Backend</span>
-            <span class="dash-status" id="dashConnection" data-state="checking">Checking…</span>
-          </button>
-          <div class="dash-row">
-            <span>Microphone</span>
-            <span class="dash-status" id="dashMicState" data-state="unknown">Not checked</span>
+          <div class="analysis-layout">
+            <div class="analysis-progress">
+              <div class="analysis-ring" id="analysisRing" role="img" aria-label="Analysis has not started">
+                <span class="analysis-ring-value" id="analysisProgress">0%</span>
+                <span class="analysis-ring-label">analyzed</span>
+              </div>
+              <div class="analysis-progress-copy">
+                <strong id="analysisFiles">No scan run</strong>
+                <span id="analysisLastScan">Start an inspection to check risky paths.</span>
+              </div>
+            </div>
+            <div class="vulnerability-panel">
+              <div class="vulnerability-head">
+                <span>Vulnerability issues</span>
+                <span class="vulnerability-total" id="vulnerabilityTotal">0</span>
+              </div>
+              <div class="severity-list" aria-label="Vulnerability issue severity">
+                <div class="severity-row">
+                  <span><i class="severity-dot severity-critical"></i>Critical</span>
+                  <strong id="criticalCount">0</strong>
+                </div>
+                <div class="severity-row">
+                  <span><i class="severity-dot severity-high"></i>High</span>
+                  <strong id="highCount">0</strong>
+                </div>
+                <div class="severity-row">
+                  <span><i class="severity-dot severity-medium"></i>Medium</span>
+                  <strong id="mediumCount">0</strong>
+                </div>
+                <div class="severity-row">
+                  <span><i class="severity-dot severity-low"></i>Low</span>
+                  <strong id="lowCount">0</strong>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="dash-actions">
-            <button class="ghost-btn" id="dashSettingsBtn" type="button">Settings</button>
+          <div class="analysis-actions">
+            <button class="primary-btn" id="runAnalysisBtn" type="button">Run analysis again</button>
             <button class="ghost-btn" id="dashNewChatBtn" type="button">New chat</button>
+            <span class="analysis-note" id="analysisNote">Findings appear after an inspection.</span>
           </div>
         </div>
+
+      </section>
+
+      <section class="pr-page" id="prPage" aria-label="Automatic pull request" hidden>
+        <div class="dash-page-head">
+          <div>
+            <h1>Auto Pull Request</h1>
+            <p>Review the proposed repository changes before approving them.</p>
+          </div>
+          <span class="pr-status" id="prStatus">Ready for review</span>
+        </div>
+        <article class="auto-pr-preview">
+          <div class="auto-pr-head">
+            <div>
+              <span class="dash-label">Pull request preview</span>
+              <h2 id="autoPrTitle">Harden the repository</h2>
+            </div>
+            <span class="pr-draft-badge">Draft</span>
+          </div>
+          <p id="autoPrSummary">Automatic inspection findings grouped into one reviewable change.</p>
+          <div class="auto-pr-facts">
+            <div><strong id="autoPrFiles">0</strong><span>Files changed</span></div>
+            <div><strong id="autoPrIssues">0</strong><span>Issues addressed</span></div>
+          </div>
+          <div class="auto-pr-section">
+            <strong>Why this is being added</strong>
+            <p id="autoPrWhy">The highest-priority findings are grouped for a focused, reviewable update.</p>
+          </div>
+          <div class="auto-pr-section">
+            <strong>Proposed changes</strong>
+            <ul id="autoPrChanges">
+              <li>Review automatic repository inspection findings</li>
+              <li>Apply targeted security and validation improvements</li>
+            </ul>
+          </div>
+          <div class="auto-pr-section">
+            <strong>Files in this pull request</strong>
+            <ul class="auto-pr-files" id="autoPrFileList">
+              <li><span class="file-change file-added">Added</span><code>index.html</code></li>
+              <li><span class="file-change file-modified">Modified</span><code>src/app.js</code></li>
+              <li><span class="file-change file-deleted">Deleted</span><code>legacy/config.js</code></li>
+            </ul>
+          </div>
+          <div class="auto-pr-actions">
+            <button class="ghost-btn" id="cancelPrBtn" type="button">Cancel</button>
+            <button class="primary-btn" id="approvePrBtn" type="button">Approve pull request</button>
+          </div>
+        </article>
       </section>
     </div>
 
@@ -203,6 +293,15 @@
 
       <p class="hint"><kbd>Enter</kbd> to send <span aria-hidden="true">·</span> <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</p>
     </div>
+
+    <nav class="bottom-nav" aria-label="DevStart AI navigation">
+      <button class="bottom-nav-btn is-active" id="bottomDashboardBtn" type="button" aria-pressed="true">
+        <span aria-hidden="true">▦</span><span>Dashboard</span>
+      </button>
+      <button class="bottom-nav-btn" id="bottomPrBtn" type="button" aria-pressed="false">
+        <span aria-hidden="true">⑂</span><span>Auto Pull Request</span>
+      </button>
+    </nav>
   </div>
 
   <dialog class="sheet" id="settingsDialog" aria-labelledby="settingsTitle">

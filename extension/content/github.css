@@ -13,6 +13,111 @@
   pointer-events: auto;
 }
 
+.devstart-pr-container[hidden] {
+  display: none;
+}
+
+.devstart-pr-toggle {
+  position: relative;
+  z-index: 1;
+  padding: 9px 13px;
+  border: 1px solid rgba(52, 224, 176, 0.72);
+  border-radius: 7px;
+  background: #163c3b;
+  color: #d7fff2;
+  font: 700 12px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.devstart-pr-toggle:hover,
+.devstart-pr-toggle[aria-expanded="true"] {
+  border-color: #34e0b0;
+  background: #164e4a;
+  box-shadow: 0 3px 10px rgba(52, 224, 176, 0.24);
+}
+
+.devstart-pr-container {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 2147483001;
+  display: block;
+}
+
+.devstart-pr-container > .devstart-pr-toggle {
+  display: none;
+}
+
+.devstart-analysis-badge {
+  min-width: 18px;
+  padding: 3px 6px;
+  border: 1px solid rgba(99, 230, 190, 0.5);
+  border-radius: 999px;
+  background: rgba(52, 224, 176, 0.16);
+  color: #8ff5d5;
+  font-size: 10px;
+  text-align: center;
+}
+
+.devstart-pr-container .devstart-pr-card {
+  right: 0;
+  bottom: calc(100% + 8px);
+  top: auto;
+  left: auto;
+}
+
+.devstart-scan-notice {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 2147483001;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 28px);
+  padding: 10px 12px 10px 15px;
+  border: 1px solid rgba(99, 230, 190, 0.72);
+  border-radius: 999px;
+  background: linear-gradient(110deg, #123b3b, #10243b);
+  color: #e8fff7;
+  font-size: 13px;
+  font-weight: 650;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.34);
+  transform: translateX(-50%);
+  animation: devstart-notice-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes devstart-notice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+.devstart-scan-notice[hidden] {
+  display: none;
+}
+
+.devstart-scan-notice a {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #34e0b0;
+  color: #06121b;
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.devstart-scan-notice a:hover {
+  background: #63e6be;
+}
+
 .devstart-launcher {
   position: fixed;
   right: 22px;
@@ -60,6 +165,21 @@
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
 }
 
+.devstart-analysis-label {
+  padding: 3px 6px;
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  border-radius: 999px;
+  color: #d9c2ff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.devstart-analysis-chevron {
+  color: #b7c2d8;
+  font-size: 15px;
+  line-height: 1;
+}
+
 .devstart-launcher[hidden] {
   display: none;
 }
@@ -99,7 +219,217 @@
   background: #0a0b12;
 }
 
+.devstart-pr-card {
+  position: absolute;
+  z-index: 2147483001;
+  display: block;
+  box-sizing: border-box;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 120px));
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(52, 224, 176, 0.34);
+  border-radius: 14px;
+  background:
+    linear-gradient(145deg, rgba(28, 54, 68, 0.96), rgba(11, 20, 35, 0.97)),
+    #0b1423;
+  color: #eef4ff;
+  visibility: visible !important;
+  opacity: 1 !important;
+  box-shadow: 0 22px 65px rgba(0, 0, 0, 0.48), 0 0 30px rgba(52, 224, 176, 0.1);
+  font-family: inherit;
+}
+
+.devstart-pr-inline {
+  margin: 0;
+}
+
+.devstart-pr-card[hidden] {
+  display: none;
+}
+
+.devstart-pr-head,
+.devstart-pr-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.devstart-pr-kicker,
+.devstart-pr-label {
+  display: block;
+  color: #9eacc7;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.devstart-pr-head h2 {
+  margin: 4px 0 0;
+  color: #fff;
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.devstart-pr-badge {
+  padding: 5px 10px;
+  border: 1px solid rgba(52, 224, 176, 0.36);
+  border-radius: 999px;
+  color: #63e6be;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.devstart-pr-summary,
+.devstart-pr-details p {
+  margin: 9px 0 0;
+  color: #b7c2d8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.devstart-vulnerability-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.devstart-vulnerability-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 6px;
+  border: 1px solid rgba(155, 169, 255, 0.18);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.055);
+  text-align: center;
+}
+
+.devstart-vulnerability-item strong {
+  color: #f7faff;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.devstart-vulnerability-item span {
+  color: #aebbd2;
+  font-size: 9px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.devstart-vulnerability-item.severity-critical {
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.devstart-vulnerability-item.severity-high {
+  border-color: rgba(251, 146, 60, 0.5);
+}
+
+.devstart-vulnerability-item.severity-medium {
+  border-color: rgba(250, 204, 21, 0.5);
+}
+
+.devstart-vulnerability-item.severity-low {
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+.devstart-pr-section-title {
+  display: block;
+  margin-top: 12px;
+  color: #eef4ff;
+  font-size: 11px;
+}
+
+.devstart-pr-changes {
+  margin: 6px 0 11px;
+  padding-left: 18px;
+  color: #cbd6e8;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.devstart-pr-changes li + li {
+  margin-top: 3px;
+}
+
+.devstart-pr-expand {
+  padding: 6px 9px;
+  border: 1px solid rgba(155, 169, 255, 0.3);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #d7e3ff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.devstart-pr-expand:hover {
+  border-color: #34e0b0;
+  background: rgba(52, 224, 176, 0.12);
+}
+
+.devstart-pr-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.devstart-pr-details > div {
+  padding: 10px;
+  border: 1px solid rgba(155, 169, 255, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.devstart-pr-details p {
+  margin-top: 5px;
+}
+
+.devstart-pr-actions {
+  justify-content: flex-start;
+  margin-top: 11px;
+}
+
+.devstart-pr-approve {
+  padding: 9px 13px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(110deg, #34e0b0, #22d3ee);
+  color: #06121b;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.devstart-pr-approve:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.devstart-pr-note {
+  color: #9eacc7;
+  font-size: 10px;
+}
+
 @media (max-width: 680px) {
+  .devstart-pr-container {
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .devstart-pr-card {
+    width: min(360px, calc(100vw - 16px));
+  }
+
   .devstart-shell {
     right: 8px;
     bottom: 8px;
@@ -112,6 +442,16 @@
   .devstart-launcher {
     right: 12px;
     bottom: 12px;
+  }
+
+  .devstart-scan-notice {
+    top: 8px;
+    max-width: calc(100vw - 16px);
+    font-size: 11px;
+  }
+
+  .devstart-pr-card {
+    width: calc(100vw - 16px);
   }
 }
 
