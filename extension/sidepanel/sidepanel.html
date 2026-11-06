@@ -1,1 +1,240 @@
-<!-- to be added soon -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevStart AI</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" id="brandMark" data-state="idle" aria-hidden="true"></span>
+        <span class="brand-copy">
+          <span class="brand-name">DevStart AI</span>
+          <span class="brand-sub">Repository intelligence</span>
+        </span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="dashboardBtn" type="button" aria-label="Open dashboard" title="Dashboard" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="4" y="4" width="6" height="7" rx="1" />
+            <rect x="14" y="4" width="6" height="4" rx="1" />
+            <rect x="14" y="12" width="6" height="8" rx="1" />
+            <rect x="4" y="15" width="6" height="5" rx="1" />
+          </svg>
+        </button>
+        <button class="icon-btn" id="settingsBtn" type="button" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 7h8" /><path d="M18 7h2" /><circle cx="15" cy="7" r="2.4" />
+            <path d="M4 17h2" /><path d="M12 17h8" /><circle cx="9" cy="17" r="2.4" />
+          </svg>
+        </button>
+        <button class="icon-btn embed-only" id="minimizeBtn" type="button" aria-label="Minimize DevStart AI" title="Minimize" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="M6 12h12" />
+          </svg>
+        </button>
+        <button class="icon-btn embed-only" id="closeBtn" type="button" aria-label="Close DevStart AI" title="Close" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <path d="m6 6 12 12" /><path d="m18 6-12 12" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="content">
+      <section class="stages-wrap" aria-label="AI process — read only">
+        <div class="stages" id="stageRail" role="list" aria-label="AI process stages">
+          <span class="stage-line" aria-hidden="true"></span>
+          <span class="stage-progress" id="stageProgress" aria-hidden="true"></span>
+
+          <div class="stage-step is-active" data-mode="understand" role="listitem" aria-current="step" title="Map: repository structure">
+            <span class="stage-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m3 12 9 5 9-5" /><path d="m3 16 9 5 9-5" />
+              </svg>
+            </span>
+            <span class="stage-label">Map</span>
+          </div>
+
+          <div class="stage-step" data-mode="onboard" role="listitem" title="Explore: setup and first run">
+            <span class="stage-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" />
+              </svg>
+            </span>
+            <span class="stage-label">Explore</span>
+          </div>
+
+          <div class="stage-step" data-mode="analyze" role="listitem" title="Inspect: bugs and risky paths">
+            <span class="stage-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M4 8V5a1 1 0 0 1 1-1h3" /><path d="M16 4h3a1 1 0 0 1 1 1v3" />
+                <path d="M20 16v3a1 1 0 0 1-1 1h-3" /><path d="M8 20H5a1 1 0 0 1-1-1v-3" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+            </span>
+            <span class="stage-label">Inspect</span>
+          </div>
+
+          <div class="stage-step" data-mode="suggest" role="listitem" title="Insights: concrete improvements">
+            <span class="stage-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z" />
+                <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" />
+              </svg>
+            </span>
+            <span class="stage-label">Insights</span>
+          </div>
+
+          <div class="stage-step" data-mode="pr" role="listitem" title="Branches: review and ship">
+            <span class="stage-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><path d="M6 8.5v7" />
+                <circle cx="18" cy="18" r="2.5" /><path d="M18 15.5V9a3 3 0 0 0-3-3h-2" /><path d="m15 3-2 3 2 3" />
+              </svg>
+            </span>
+            <span class="stage-label">Branches</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="chat-view" id="chatView">
+        <section class="stage-card" id="stageCard">
+          <h1 id="modeTitle">Map the repository</h1>
+          <p id="modeDesc">See how the project is structured, where the entry points are, and which files matter first.</p>
+        </section>
+
+        <section class="thread" id="thread" aria-live="polite" aria-label="Conversation"></section>
+      </div>
+
+      <section class="dashboard-page" id="dashboardPage" aria-label="Repository dashboard" hidden>
+        <div class="dash-page-head">
+          <div>
+            <h1>Repository dashboard</h1>
+            <p>Overview of this repo and the assistant's progress.</p>
+          </div>
+          <button class="ghost-btn back-btn" id="backToChatBtn" type="button">Back to chat</button>
+        </div>
+
+        <div class="dash-repo-card">
+          <span class="dash-repo-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5" /><path d="M4 19.5h16" /><path d="M9 7h6" />
+            </svg>
+          </span>
+          <span class="dash-repo-copy">
+            <span class="dash-repo-name" id="dashRepo">Current repository</span>
+            <span class="dash-repo-meta">
+              <span class="dash-badge" id="dashVisibility">Repo</span>
+              <span class="dash-branch" id="dashBranch">main</span>
+            </span>
+          </span>
+        </div>
+
+        <div class="dash-stat-grid">
+          <div class="dash-stat">
+            <span class="dash-label">Stars</span>
+            <span class="dash-value" id="dashStars">—</span>
+          </div>
+          <div class="dash-stat">
+            <span class="dash-label">Forks</span>
+            <span class="dash-value" id="dashForks">—</span>
+          </div>
+          <div class="dash-stat">
+            <span class="dash-label">Issues</span>
+            <span class="dash-value" id="dashIssues">—</span>
+          </div>
+        </div>
+
+        <div class="dash-card">
+          <div class="dash-card-head">
+            <span>AI process</span>
+            <span id="dashStage">Map · step 1 of 5</span>
+          </div>
+          <div class="dash-track" aria-hidden="true">
+            <span class="dash-fill" id="dashFill"></span>
+          </div>
+          <div class="dash-stage-list" id="dashStageList"></div>
+        </div>
+
+        <div class="dash-card">
+          <div class="dash-card-head">
+            <span>System</span>
+          </div>
+          <button class="dash-row" id="backendCheckBtn" type="button" title="Check the backend connection">
+            <span>Backend</span>
+            <span class="dash-status" id="dashConnection" data-state="checking">Checking…</span>
+          </button>
+          <div class="dash-row">
+            <span>Microphone</span>
+            <span class="dash-status" id="dashMicState" data-state="unknown">Not checked</span>
+          </div>
+          <div class="dash-actions">
+            <button class="ghost-btn" id="dashSettingsBtn" type="button">Settings</button>
+            <button class="ghost-btn" id="dashNewChatBtn" type="button">New chat</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="composer-area" id="composerArea">
+      <section class="prompts" id="prompts" aria-label="Suggested prompts"></section>
+
+      <form class="composer" id="composer" autocomplete="off">
+        <label class="sr-only" for="input">Ask DevStart AI</label>
+        <textarea id="input" rows="1" placeholder="Ask what this repository does…" spellcheck="false"></textarea>
+        <div class="composer-actions">
+          <button class="icon-btn mic-btn" id="micBtn" type="button" aria-label="Start voice input" title="Voice input">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0" /><path d="M12 18v3" /><path d="M8 21h8" />
+            </svg>
+          </button>
+          <button class="send-btn" id="sendBtn" type="submit" aria-label="Send message" title="Send" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 19V5" /><path d="m6 11 6-6 6 6" />
+            </svg>
+          </button>
+        </div>
+      </form>
+
+      <p class="hint"><kbd>Enter</kbd> to send <span aria-hidden="true">·</span> <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</p>
+    </div>
+  </div>
+
+  <dialog class="sheet" id="settingsDialog" aria-labelledby="settingsTitle">
+    <form id="settingsForm">
+      <div class="sheet-head">
+        <h2 id="settingsTitle">Settings</h2>
+        <button class="icon-btn" type="button" id="closeSettings" aria-label="Close settings" title="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m6 6 12 12" /><path d="m18 6-12 12" />
+          </svg>
+        </button>
+      </div>
+      <p class="sheet-desc">DevStart AI talks to your local FastAPI backend. When it isn't running, the panel answers with preview replies so the interface stays usable.</p>
+      <label class="field">
+        <span>Backend URL</span>
+        <input id="apiInput" type="url" placeholder="http://127.0.0.1:8000" spellcheck="false" />
+      </label>
+      <div class="sheet-row">
+        <span class="sheet-row-copy">
+          <span class="sheet-row-title">Microphone</span>
+          <span class="mic-state" id="micState" data-state="unknown">Not checked</span>
+        </span>
+        <button class="ghost-btn" type="button" id="micPermissionBtn">Allow</button>
+      </div>
+      <div class="sheet-actions">
+        <button class="ghost-btn" type="button" id="testBtn">Test connection</button>
+        <button class="primary-btn" type="submit" id="saveBtn">Save</button>
+      </div>
+      <p class="test-result" id="testResult" role="status"></p>
+    </form>
+  </dialog>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

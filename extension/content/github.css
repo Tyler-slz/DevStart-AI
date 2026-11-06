@@ -1,0 +1,123 @@
+/* DevStart AI — injected on GitHub repository pages.
+   All selectors are prefixed so GitHub's own styles are left alone. */
+
+#devstart-host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+}
+
+#devstart-host > * {
+  pointer-events: auto;
+}
+
+.devstart-launcher {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px 8px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(12, 13, 20, 0.94);
+  color: #eef0f6;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(168, 85, 247, 0.12);
+  backdrop-filter: blur(12px);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.devstart-launcher:hover {
+  transform: translateY(-1px);
+  border-color: rgba(168, 85, 247, 0.5);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(168, 85, 247, 0.28);
+}
+
+.devstart-launcher:active {
+  transform: translateY(0);
+}
+
+.devstart-launcher:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 2px;
+}
+
+.devstart-launcher .devstart-mark {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: 7px;
+  background: conic-gradient(from 210deg, #ff4d9d, #a855f7, #5b7cfa, #22d3ee, #34e0b0, #ffcc57, #ff4d9d);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+
+.devstart-launcher[hidden] {
+  display: none;
+}
+
+.devstart-shell {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  width: min(566px, calc(100vw - 44px));
+  height: min(824px, calc(100vh - 44px));
+  overflow: hidden;
+  border-radius: 18px;
+  background: #0a0b12;
+  opacity: 0;
+  transform: translateY(12px) scale(0.99);
+  transition: opacity 220ms cubic-bezier(0.22, 1, 0.36, 1), transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow:
+    0 34px 100px rgba(0, 0, 0, 0.66),
+    0 0 0 1px rgba(255, 255, 255, 0.09),
+    0 0 60px rgba(124, 58, 237, 0.12);
+}
+
+.devstart-shell[hidden] {
+  display: none;
+}
+
+.devstart-shell.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.devstart-shell iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #0a0b12;
+}
+
+@media (max-width: 680px) {
+  .devstart-shell {
+    right: 8px;
+    bottom: 8px;
+    left: 8px;
+    width: auto;
+    height: calc(100vh - 16px);
+    border-radius: 16px;
+  }
+
+  .devstart-launcher {
+    right: 12px;
+    bottom: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .devstart-shell,
+  .devstart-launcher {
+    transition-duration: 0.01ms;
+  }
+}

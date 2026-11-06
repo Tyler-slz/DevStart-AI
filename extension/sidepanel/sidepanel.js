@@ -1,1 +1,1218 @@
-// to be added soon
+/* DevStart AI — panel controller
+ *
+ * Runs in two places:
+ *   1. Chrome side panel.
+ *   2. A floating iframe injected on GitHub repository pages (?embed=1).
+ *
+ * Backend contract (FastAPI, default http://127.0.0.1:8000):
+ *   GET  /health        -> any 2xx means reachable
+ *   POST /api/chat      -> { "reply": "...", "mode"?: "insights" }
+ *        body: { message: string, mode: string, history: [{ role, content }] }
+ *        `mode` (or `stage`) is optional; when present it moves the process
+ *        rail automatically. Valid values match MODES below.
+ *
+ * The top rail is read-only: it exists so the user can see which part of the
+ * workflow the assistant is working on. The assistant moves it, not the user.
+ */
+
+const API_BASE_DEFAULT = "http://127.0.0.1:8000";
+const REQUEST_TIMEOUT = 20000;
+
+const MODES = {
+  understand: {
+    label: "Map",
+    title: "Map the repository",
+    desc: "See how the project is structured, where the entry points are, and which files matter first.",
+    placeholder: "Ask what this repository does…",
+    prompts: [
+      "What does this project do?",
+      "How is the code organized?",
+      "Where should I start reading?"
+    ]
+  },
+  onboard: {
+    label: "Explore",
+    title: "Explore the setup",
+    desc: "Walk through dependencies, environment variables, and the first run.",
+    placeholder: "Ask how to run this project…",
+    prompts: [
+      "How do I set this up?",
+      "Which dependencies do I need?",
+      "What environment variables are required?"
+    ]
+  },
+  analyze: {
+    label: "Inspect",
+    title: "Inspect the code",
+    desc: "Trace risky paths and surface bugs with reasoning tied to specific files.",
+    placeholder: "Ask what looks risky…",
+    prompts: [
+      "Scan for likely bugs",
+      "Find code smells",
+      "What should I refactor first?"
+    ]
+  },
+  suggest: {
+    label: "Insights",
+    title: "Shape improvements",
+    desc: "Turn findings into concrete, reviewable changes with a clear rationale.",
+    placeholder: "Ask for an improvement…",
+    prompts: [
+      "Suggest a refactor",
+      "Simplify this function",
+      "How can I improve readability?"
+    ]
+  },
+  pr: {
+    label: "Branches",
+    title: "Review and ship",
+    desc: "Check the diff, group the risk, then prepare a pull request for your approval.",
+    placeholder: "Ask about the diff or a pull request…",
+    prompts: [
+      "Review the current changes",
+      "What risks are in this diff?",
+      "Draft a pull request"
+    ]
+  }
+};
+
+const MODE_ORDER = Object.keys(MODES);
+
+/* What the developer asks decides which stage the assistant moves into. */
+const MODE_SIGNALS = {
+  understand: [
+    [/\b(what|how) (does|is|do)\b/, 2],
+    [/\bmap\b/, 2],
+    [/\bstructure\b/, 2],
+    [/\borgani[sz]/, 2],
+    [/\boverview\b/, 2],
+    [/\barchitecture\b/, 2],
+    [/\bentry points?\b/, 2],
+    [/\bstart reading\b/, 2],
+    [/\bexplain\b/, 1],
+    [/\brepo(sitory)?\b/, 1]
+  ],
+  onboard: [
+    [/\b(getting started|onboard(ing)?|explore)\b/, 3],
+    [/\b(set ?up|install|dependenc|environment|env var|configure)\b/, 2],
+    [/\bhow do i (run|start|install|set)\b/, 3],
+    [/\brun\b/, 1]
+  ],
+  analyze: [
+    [/\b(bug|bugs|risk|risky|scan|inspect|analy[sz]e|smell|security|vulnerab|issue|lint)\b/, 2],
+    [/\bwhat.*(wrong|risky|broken)\b/, 3],
+    [/\btests?\b/, 1]
+  ],
+  suggest: [
+    [/\b(insights?|suggest|improve|refactor|simplif|readab|optimi[sz]e|fix|clean|rewrite)\b/, 2],
+    [/\bhow can i improve\b/, 3]
+  ],
+  pr: [
+    [/\bpull request\b/, 4],
+    [/\b(open|create|draft|make) (a )?pr\b/, 4],
+    [/\breview (the )?(changes|diff|pr)\b/, 3],
+    [/\b(branch|branches|commit|merge|ship)\b/, 2],
+    [/\bdiff\b/, 1]
+  ]
+};
+
+function inferMode(text) {
+  const lower = text.toLowerCase();
+  let best = null;
+  let bestScore = 0;
+  let bestIndex = -1;
+
+  for (const mode of MODE_ORDER) {
+    let score = 0;
+    for (const [pattern, weight] of MODE_SIGNALS[mode]) {
+      if (pattern.test(lower)) score += weight;
+    }
+    const index = MODE_ORDER.indexOf(mode);
+    if (score > bestScore || (score === bestScore && score > 0 && index > bestIndex)) {
+      best = mode;
+      bestScore = score;
+      bestIndex = index;
+    }
+  }
+
+  return best;
+}
+
+const state = {
+  mode: "understand",
+  view: "chat",
+  history: [],
+  busy: false,
+  listening: false,
+  usingBackend: false,
+  apiBase: API_BASE_DEFAULT,
+  embedded: new URLSearchParams(location.search).get("embed") === "1",
+  repo: {
+    fullName: "",
+    owner: "",
+    name: "",
+    visibility: "Repo",
+    branch: "main",
+    stars: "—",
+    forks: "—",
+    issues: "—"
+  }
+};
+
+/* ---------- Elements ---------- */
+
+const $ = (id) => document.getElementById(id);
+
+const els = {
+  stageRail: $("stageRail"),
+  stageProgress: $("stageProgress"),
+  stageCard: $("stageCard"),
+  modeTitle: $("modeTitle"),
+  modeDesc: $("modeDesc"),
+  brandMark: $("brandMark"),
+  chatView: $("chatView"),
+  dashboardPage: $("dashboardPage"),
+  dashboardBtn: $("dashboardBtn"),
+  backToChatBtn: $("backToChatBtn"),
+  dashSettingsBtn: $("dashSettingsBtn"),
+  dashNewChatBtn: $("dashNewChatBtn"),
+  backendCheckBtn: $("backendCheckBtn"),
+  dashConnection: $("dashConnection"),
+  dashMicState: $("dashMicState"),
+  dashStageList: $("dashStageList"),
+  composerArea: $("composerArea"),
+  dashRepo: $("dashRepo"),
+  dashVisibility: $("dashVisibility"),
+  dashBranch: $("dashBranch"),
+  dashStars: $("dashStars"),
+  dashForks: $("dashForks"),
+  dashIssues: $("dashIssues"),
+  dashStage: $("dashStage"),
+  dashFill: $("dashFill"),
+  thread: $("thread"),
+  prompts: $("prompts"),
+  composer: $("composer"),
+  input: $("input"),
+  sendBtn: $("sendBtn"),
+  micBtn: $("micBtn"),
+  settingsBtn: $("settingsBtn"),
+  minimizeBtn: $("minimizeBtn"),
+  closeBtn: $("closeBtn"),
+  settingsDialog: $("settingsDialog"),
+  settingsForm: $("settingsForm"),
+  apiInput: $("apiInput"),
+  testBtn: $("testBtn"),
+  testResult: $("testResult"),
+  closeSettings: $("closeSettings"),
+  micState: $("micState"),
+  micPermissionBtn: $("micPermissionBtn"),
+  hint: document.querySelector(".hint")
+};
+
+/* ---------- Embed bridge ---------- */
+
+function postToParent(type, payload = {}) {
+  if (!state.embedded) return;
+  try {
+    window.parent.postMessage({ source: "devstart-panel", type, ...payload }, "*");
+  } catch {
+    /* parent may be gone */
+  }
+}
+
+if (state.embedded) {
+  if (els.minimizeBtn) els.minimizeBtn.hidden = false;
+  if (els.closeBtn) els.closeBtn.hidden = false;
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const data = event.data;
+    if (!data || data.source !== "devstart-content") return;
+
+    if (data.type === "REPO_CONTEXT" && data.repo) {
+      setRepoContext(data.repo);
+    }
+  });
+}
+
+/* ---------- Storage ---------- */
+
+const hasChromeStorage =
+  typeof chrome !== "undefined" && chrome.storage && chrome.storage.local;
+
+function storageGet(key, fallback) {
+  return new Promise((resolve) => {
+    try {
+      if (hasChromeStorage) {
+        chrome.storage.local.get([key], (result) => {
+          resolve(result && result[key] !== undefined ? result[key] : fallback);
+        });
+        return;
+      }
+      const raw = localStorage.getItem(key);
+      resolve(raw === null ? fallback : JSON.parse(raw));
+    } catch {
+      resolve(fallback);
+    }
+  });
+}
+
+function storageSet(key, value) {
+  try {
+    if (hasChromeStorage) {
+      chrome.storage.local.set({ [key]: value });
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* storage unavailable — ignore */
+  }
+}
+
+/* ---------- Helpers ---------- */
+
+function normalizeBase(url) {
+  return String(url || API_BASE_DEFAULT)
+    .trim()
+    .replace(/\/+$/, "");
+}
+
+function fetchWithTimeout(url, options = {}, timeout = REQUEST_TIMEOUT) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() =>
+    clearTimeout(timer)
+  );
+}
+
+function scrollThread() {
+  els.thread.scrollTop = els.thread.scrollHeight;
+}
+
+function setActivity(next) {
+  els.brandMark.dataset.state = next;
+}
+
+function setStatus(kind) {
+  if (els.dashConnection) {
+    const label =
+      kind === "online"
+        ? "Connected"
+        : kind === "offline"
+          ? "Preview mode"
+          : "Checking…";
+    els.dashConnection.textContent = label;
+    els.dashConnection.dataset.state = kind;
+    els.dashConnection.title =
+      kind === "online"
+        ? "Connected to the local backend"
+        : kind === "offline"
+          ? "Backend offline — showing preview replies"
+          : "Checking backend connection";
+  }
+
+  if (els.backendCheckBtn) {
+    els.backendCheckBtn.dataset.state = kind;
+  }
+}
+
+const hintMarkup = els.hint ? els.hint.innerHTML : "";
+let hintTimer = null;
+
+function showHint(message) {
+  if (!els.hint) return;
+  clearTimeout(hintTimer);
+  els.hint.textContent = message;
+  hintTimer = setTimeout(() => {
+    els.hint.innerHTML = hintMarkup;
+  }, 3200);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
+function formatInline(text) {
+  return escapeHtml(text).replace(/`([^`\n]+)`/g, "<code>$1</code>");
+}
+
+/* ---------- Repository dashboard ---------- */
+
+function formatCount(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "string") return value;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  if (number >= 1000000) return `${(number / 1000000).toFixed(1).replace(/\.0$/, "")}m`;
+  if (number >= 1000) return `${(number / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  return String(number);
+}
+
+function renderProgress() {
+  const index = MODE_ORDER.indexOf(state.mode);
+  els.dashStage.textContent = `${MODES[state.mode].label} · step ${index + 1} of ${MODE_ORDER.length}`;
+  els.dashFill.style.width = `${((index + 1) / MODE_ORDER.length) * 100}%`;
+  renderDashStageList(index);
+}
+
+function renderDashStageList(activeIndex = MODE_ORDER.indexOf(state.mode)) {
+  if (!els.dashStageList) return;
+  els.dashStageList.innerHTML = "";
+
+  MODE_ORDER.forEach((mode, index) => {
+    const row = document.createElement("div");
+    row.className = "dash-stage";
+    row.dataset.state = index === activeIndex ? "active" : index < activeIndex ? "done" : "idle";
+
+    const dot = document.createElement("span");
+    dot.className = "dash-stage-dot";
+    dot.setAttribute("aria-hidden", "true");
+
+    const name = document.createElement("span");
+    name.className = "dash-stage-name";
+    name.textContent = MODES[mode].label;
+
+    const meta = document.createElement("span");
+    meta.className = "dash-stage-meta";
+    meta.textContent =
+      index < activeIndex ? "done" : index === activeIndex ? "in progress" : `step ${index + 1}`;
+
+    row.append(dot, name, meta);
+    els.dashStageList.appendChild(row);
+  });
+}
+
+function renderDashboard() {
+  const repo = state.repo;
+  els.dashRepo.textContent = repo.fullName || "Current repository";
+  els.dashVisibility.textContent = repo.visibility || "Repo";
+  els.dashBranch.textContent = repo.branch || "main";
+  els.dashStars.textContent = formatCount(repo.stars);
+  els.dashForks.textContent = formatCount(repo.forks);
+  els.dashIssues.textContent = formatCount(repo.issues);
+  renderProgress();
+}
+
+let enrichedRepo = "";
+
+async function enrichRepoFromApi(fullName) {
+  if (!fullName || !fullName.includes("/") || enrichedRepo === fullName) return;
+  enrichedRepo = fullName;
+
+  const [owner, name] = fullName.split("/");
+
+  try {
+    const res = await fetchWithTimeout(
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+      { headers: { Accept: "application/vnd.github+json" } },
+      5000
+    );
+    if (!res.ok) return;
+
+    const data = await res.json();
+    setRepoContext({
+      fullName: data.full_name || fullName,
+      visibility: data.private ? "Private" : "Public",
+      branch: data.default_branch || state.repo.branch || "main",
+      stars: data.stargazers_count,
+      forks: data.forks_count,
+      issues: data.open_issues_count
+    });
+  } catch {
+    /* keep whatever the page or browser gave us */
+  }
+}
+
+function setRepoContext(repo = {}) {
+  state.repo = { ...state.repo, ...repo };
+  renderDashboard();
+
+  const missingStats = !state.repo.stars || state.repo.stars === "—";
+  if (missingStats) enrichRepoFromApi(state.repo.fullName);
+}
+
+async function loadRepoFromActiveTab() {
+  if (state.embedded || !isExtensionPage() || !chrome.tabs || !chrome.tabs.query) {
+    renderDashboard();
+    return;
+  }
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (!tab || !tab.url) {
+      renderDashboard();
+      return;
+    }
+
+    const url = new URL(tab.url);
+    if (url.hostname !== "github.com" && url.hostname !== "www.github.com") {
+      renderDashboard();
+      return;
+    }
+
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) {
+      renderDashboard();
+      return;
+    }
+
+    const [owner, name] = parts;
+    setRepoContext({ fullName: `${owner}/${name}`, owner, name });
+  } catch {
+    renderDashboard();
+  }
+}
+
+/* ---------- View switching ---------- */
+
+function setView(view) {
+  const next = view === "dashboard" ? "dashboard" : "chat";
+  state.view = next;
+
+  const isDashboard = next === "dashboard";
+
+  if (els.chatView) els.chatView.hidden = isDashboard;
+  if (els.dashboardPage) els.dashboardPage.hidden = !isDashboard;
+  if (els.composerArea) els.composerArea.hidden = isDashboard;
+
+  if (els.dashboardBtn) {
+    els.dashboardBtn.classList.toggle("is-active", isDashboard);
+    els.dashboardBtn.setAttribute("aria-pressed", String(isDashboard));
+    els.dashboardBtn.title = isDashboard ? "Back to chat" : "Dashboard";
+    els.dashboardBtn.setAttribute(
+      "aria-label",
+      isDashboard ? "Back to chat" : "Open dashboard"
+    );
+  }
+
+  if (isDashboard) {
+    renderDashboard();
+    if (els.dashboardPage) els.dashboardPage.scrollTop = 0;
+    if (!state.embedded) loadRepoFromActiveTab();
+  }
+}
+
+/* ---------- Messages ---------- */
+
+function removeEmpty() {
+  const empty = els.thread.querySelector(".empty");
+  if (empty) empty.remove();
+}
+
+function renderEmpty() {
+  els.thread.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "empty";
+
+  const strong = document.createElement("strong");
+  strong.textContent = "Ready when you are";
+
+  const span = document.createElement("span");
+  span.textContent = "Ask about the repository open in this tab, or pick a prompt below.";
+
+  wrap.append(strong, span);
+  els.thread.appendChild(wrap);
+}
+
+function createAvatar() {
+  const avatar = document.createElement("span");
+  avatar.className = "ai-avatar";
+  avatar.setAttribute("aria-hidden", "true");
+  avatar.innerHTML =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.5 4.1L17.6 8.6 13.5 10.1 12 14.2 10.5 10.1 6.4 8.6 10.5 7.1 12 3Z"/><path d="M18.5 14.5l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7.7-1.9Z"/></svg>';
+  return avatar;
+}
+
+function addMessage(role, text) {
+  removeEmpty();
+  const row = document.createElement("div");
+  row.className = "msg-row " + role;
+
+  if (role === "ai") row.appendChild(createAvatar());
+
+  const el = document.createElement("div");
+  el.className = "msg " + role;
+  if (role === "ai") {
+    el.innerHTML = formatInline(text);
+  } else {
+    el.textContent = text;
+  }
+
+  row.appendChild(el);
+  els.thread.appendChild(row);
+  scrollThread();
+  return el;
+}
+
+function addDivider(label) {
+  const el = document.createElement("div");
+  el.className = "thread-divider";
+  el.textContent = label;
+  els.thread.appendChild(el);
+  scrollThread();
+}
+
+function addTyping() {
+  removeEmpty();
+  const el = document.createElement("div");
+  el.className = "typing";
+  el.setAttribute("role", "status");
+  el.setAttribute("aria-label", "DevStart AI is thinking");
+  const bar = document.createElement("span");
+  bar.className = "typing-bar";
+  el.appendChild(bar);
+  els.thread.appendChild(el);
+  scrollThread();
+  return el;
+}
+
+function addError(retryText) {
+  removeEmpty();
+  const row = document.createElement("div");
+  row.className = "msg-row ai";
+  row.appendChild(createAvatar());
+
+  const el = document.createElement("div");
+  el.className = "msg error";
+  el.textContent = "Couldn't reach the backend. Check the URL in settings and try again.";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "retry-btn";
+  btn.textContent = "Retry";
+  btn.addEventListener("click", () => {
+    if (state.busy) return;
+    row.remove();
+    requestReply(retryText);
+  });
+
+  el.appendChild(document.createElement("br"));
+  el.appendChild(btn);
+  row.appendChild(el);
+  els.thread.appendChild(row);
+  scrollThread();
+}
+
+/* ---------- Reply pipeline ---------- */
+
+async function getReply(text) {
+  if (state.usingBackend) {
+    try {
+      return await callBackend(text);
+    } catch {
+      state.usingBackend = false;
+      setStatus("offline");
+    }
+  }
+  return mockReply(text);
+}
+
+async function callBackend(message) {
+  const res = await fetchWithTimeout(`${state.apiBase}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      message,
+      mode: state.mode,
+      history: state.history.slice(-8)
+    })
+  });
+
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+  const data = await res.json();
+  const reply = data.reply ?? data.message ?? data.content ?? data.answer;
+  if (!reply || typeof reply !== "string") throw new Error("Empty reply");
+
+  const stage = typeof data.mode === "string" ? data.mode : data.stage;
+  return { reply, mode: MODES[stage] ? stage : null };
+}
+
+function mockReply(text) {
+  const lower = text.toLowerCase();
+  const mode = state.mode;
+
+  const answers = [];
+
+  if (lower.includes("bug") || lower.includes("risk") || lower.includes("scan")) {
+    answers.push(
+      "I'd start with the request handlers and anything that trusts user input. I can walk file by file and flag the patterns that usually become bugs, with the reasoning for each."
+    );
+  }
+  if (
+    lower.includes("setup") ||
+    lower.includes("set up") ||
+    lower.includes("set this up") ||
+    lower.includes("run") ||
+    lower.includes("install") ||
+    lower.includes("depend")
+  ) {
+    answers.push(
+      "The usual path is: create a virtual environment, install the backend requirements, add the environment variables, then start FastAPI with uvicorn. I can turn that into a checklist for this repo."
+    );
+  }
+  if (lower.includes("structure") || lower.includes("organiz") || lower.includes("start reading") || lower.includes("what does")) {
+    answers.push(
+      "This project splits into a `Chrome extension`, a `FastAPI backend`, and `Firebase` configuration. I'd read the extension panel first, then the API routes, then the shared config."
+    );
+  }
+  if (lower.includes("refactor") || lower.includes("improve") || lower.includes("readab") || lower.includes("simplif")) {
+    answers.push(
+      "A good first pass is to isolate the panel state and API calls into small modules, then keep the DOM layer thin. That makes each piece testable without changing behavior."
+    );
+  }
+  if (/\bpull request\b|\bpr\b|\bdiff\b/.test(lower)) {
+    answers.push(
+      "I'll group the diff by risk, call out anything that changes behavior, and draft a PR summary you can approve. Nothing is pushed until you confirm."
+    );
+  }
+
+  if (!answers.length) {
+    answers.push(
+      "Got it. I'll look at the repository context and come back with a focused answer, including the files involved and a suggested next step."
+    );
+  }
+
+  const base = answers[Math.floor(Math.random() * answers.length)];
+  const suffix =
+    mode === "pr"
+      ? " Review remains read-only until you approve."
+      : mode === "analyze"
+        ? " I'll keep findings tied to specific files."
+        : "";
+
+  const next = inferMode(text) || mode;
+
+  return new Promise((resolve) => {
+    setTimeout(() => resolve({ reply: base + suffix, mode: next }), 620 + Math.random() * 480);
+  });
+}
+
+async function requestReply(text) {
+  if (state.busy) return;
+
+  state.busy = true;
+  els.sendBtn.disabled = true;
+  if (!state.listening) setActivity("thinking");
+
+  const typing = addTyping();
+
+  try {
+    const result = await getReply(text);
+    typing.remove();
+
+    if (result.mode && result.mode !== state.mode) {
+      setMode(result.mode, { auto: true });
+    }
+
+    addMessage("ai", result.reply);
+    state.history.push({ role: "assistant", content: result.reply });
+  } catch {
+    typing.remove();
+    addError(text);
+  } finally {
+    state.busy = false;
+    if (!state.listening) setActivity("idle");
+    syncSend();
+  }
+}
+
+async function sendMessage(raw) {
+  const text = (raw ?? els.input.value).trim();
+  if (!text || state.busy) return;
+
+  if (raw === undefined) {
+    els.input.value = "";
+    autoResize();
+  }
+
+  addMessage("user", text);
+  state.history.push({ role: "user", content: text });
+
+  const intent = inferMode(text);
+  if (intent && intent !== state.mode) {
+    setMode(intent, { auto: true });
+  }
+
+  syncSend();
+  await requestReply(text);
+}
+
+/* ---------- Read-only process rail ---------- */
+
+let flashTimer = null;
+
+function flashMode(mode) {
+  const step = document.querySelector(`.stage-step[data-mode="${mode}"]`);
+  if (!step) return;
+
+  document.querySelectorAll(".stage-step.is-auto").forEach((el) => {
+    el.classList.remove("is-auto");
+  });
+
+  step.classList.add("is-auto");
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => step.classList.remove("is-auto"), 900);
+}
+
+function setMode(mode, options = {}) {
+  if (!MODES[mode]) return;
+
+  const previous = state.mode;
+  state.mode = mode;
+  const activeIndex = MODE_ORDER.indexOf(mode);
+
+  document.querySelectorAll(".stage-step").forEach((step) => {
+    const index = MODE_ORDER.indexOf(step.dataset.mode);
+    const isActive = step.dataset.mode === mode;
+    step.classList.toggle("is-active", isActive);
+    step.classList.toggle("is-complete", index < activeIndex);
+    if (isActive) {
+      step.setAttribute("aria-current", "step");
+    } else {
+      step.removeAttribute("aria-current");
+    }
+  });
+
+  const info = MODES[mode];
+
+  if (els.stageRail) {
+    els.stageRail.setAttribute(
+      "aria-label",
+      options.auto ? `AI process — now at ${info.label}` : "AI process — read only"
+    );
+  }
+
+  const ratio = activeIndex / (MODE_ORDER.length - 1);
+  els.stageRail.style.setProperty("--flow", String(ratio));
+  renderProgress();
+
+  els.modeTitle.textContent = info.title;
+  els.modeDesc.textContent = info.desc;
+  els.input.placeholder = info.placeholder;
+  renderPrompts();
+
+  els.stageCard.classList.remove("is-swapping");
+  // restart the swap animation
+  void els.stageCard.offsetWidth;
+  els.stageCard.classList.add("is-swapping");
+
+  if (!options.silent && previous !== mode && state.history.length > 0) {
+    addDivider(info.label);
+  }
+
+  if (options.auto) flashMode(mode);
+
+  setActivity("idle");
+  storageSet("mode", mode);
+}
+
+function renderPrompts() {
+  els.prompts.innerHTML = "";
+  MODES[state.mode].prompts.forEach((text) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "prompt";
+    btn.textContent = text;
+    btn.addEventListener("click", () => {
+      els.input.value = "";
+      sendMessage(text);
+    });
+    els.prompts.appendChild(btn);
+  });
+}
+
+/* ---------- Composer ---------- */
+
+function autoResize() {
+  els.input.style.height = "auto";
+  els.input.style.height = Math.min(els.input.scrollHeight, 110) + "px";
+}
+
+function syncSend() {
+  els.sendBtn.disabled = state.busy || els.input.value.trim().length === 0;
+}
+
+/* ---------- Backend status ---------- */
+
+async function checkBackend() {
+  setStatus("checking");
+  try {
+    await fetchWithTimeout(`${state.apiBase}/health`, {}, 3500);
+    state.usingBackend = true;
+  } catch {
+    state.usingBackend = false;
+  }
+  setStatus(state.usingBackend ? "online" : "offline");
+}
+
+/* ---------- Voice input ---------- */
+
+let recognition = null;
+let micGrantedThisSession = false;
+
+function isExtensionPage() {
+  return (
+    typeof chrome !== "undefined" &&
+    chrome.runtime &&
+    typeof chrome.runtime.getURL === "function" &&
+    location.protocol === "chrome-extension:"
+  );
+}
+
+async function queryMicPermission() {
+  try {
+    if (navigator.permissions && navigator.permissions.query) {
+      const status = await navigator.permissions.query({ name: "microphone" });
+      return status.state;
+    }
+  } catch {
+    /* permissions API may not expose microphone */
+  }
+  return "unknown";
+}
+
+function updateMicSettings(stateName) {
+  const map = {
+    granted: "Allowed",
+    prompt: "Not allowed yet",
+    denied: "Blocked in browser settings",
+    unknown: "Not checked",
+    session: "Allowed for this session"
+  };
+  const label = map[stateName] || map.unknown;
+
+  if (els.micState) {
+    els.micState.textContent = label;
+    els.micState.dataset.state = stateName;
+  }
+
+  if (els.dashMicState) {
+    els.dashMicState.textContent = stateName === "granted" || stateName === "session" ? "Ready" : label;
+    els.dashMicState.dataset.state = stateName;
+  }
+
+  if (els.micPermissionBtn) {
+    els.micPermissionBtn.disabled =
+      stateName === "granted" || stateName === "session";
+  }
+}
+
+function openMicPermissionPage() {
+  if (!isExtensionPage()) {
+    showHint("Open the panel from the extension to enable the microphone.");
+    return;
+  }
+  const url = chrome.runtime.getURL("assets/mic-permission.html");
+  if (chrome.tabs && chrome.tabs.create) {
+    chrome.tabs.create({ url });
+  } else {
+    window.open(url, "_blank");
+  }
+}
+
+function getRecognition() {
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return null;
+
+  const rec = new SpeechRecognition();
+  rec.lang = "en-US";
+  rec.continuous = false;
+  rec.interimResults = true;
+  rec.maxAlternatives = 1;
+
+  rec.addEventListener("start", () => {
+    state.listening = true;
+    els.micBtn.classList.add("is-listening");
+    els.micBtn.setAttribute("aria-label", "Stop voice input");
+    setActivity("listening");
+    els.input.placeholder = "Listening…";
+  });
+
+  rec.addEventListener("result", (event) => {
+    let transcript = "";
+    let isFinal = false;
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      transcript += event.results[i][0].transcript;
+      if (event.results[i].isFinal) isFinal = true;
+    }
+    els.input.value = transcript;
+    autoResize();
+    syncSend();
+    if (isFinal && transcript.trim()) {
+      rec.stop();
+      sendMessage(transcript.trim());
+    }
+  });
+
+  rec.addEventListener("error", (event) => {
+    const reason = event.error;
+
+    if (reason === "not-allowed" || reason === "service-not-allowed") {
+      micGrantedThisSession = false;
+      updateMicSettings("denied");
+      showHint("Microphone is blocked. Open settings to allow it.");
+    } else if (reason === "audio-capture") {
+      showHint("No microphone was found. Check your input device.");
+    } else if (reason === "network") {
+      showHint("Speech recognition needs a network connection.");
+    } else if (reason === "no-speech") {
+      showHint("Didn't catch that. Tap the mic and try again.");
+    } else if (reason !== "aborted") {
+      showHint("Voice input stopped. Try again.");
+    }
+  });
+
+  rec.addEventListener("end", () => {
+    state.listening = false;
+    els.micBtn.classList.remove("is-listening");
+    els.micBtn.setAttribute("aria-label", "Start voice input");
+    els.input.placeholder = MODES[state.mode].placeholder;
+    if (!state.busy) setActivity("idle");
+  });
+
+  return rec;
+}
+
+function startListening() {
+  if (!recognition) recognition = getRecognition();
+
+  if (!recognition) {
+    showHint("Voice input isn't available in this browser.");
+    return;
+  }
+
+  try {
+    recognition.start();
+  } catch {
+    showHint("Voice input is already starting.");
+  }
+}
+
+async function toggleListening() {
+  if (state.listening) {
+    if (recognition) recognition.stop();
+    return;
+  }
+
+  if (micGrantedThisSession) {
+    startListening();
+    return;
+  }
+
+  // A side panel or embedded iframe cannot always raise the microphone prompt,
+  // so check first and route the user through a full extension page.
+  const permission = await queryMicPermission();
+
+  if (permission === "denied") {
+    updateMicSettings("denied");
+    showHint("Microphone is blocked. Enable it in the browser site settings.");
+    return;
+  }
+
+  if (permission === "granted") {
+    micGrantedThisSession = true;
+    updateMicSettings("granted");
+    startListening();
+    return;
+  }
+
+  if (isExtensionPage()) {
+    updateMicSettings("prompt");
+    openMicPermissionPage();
+    showHint("Allow the microphone in the tab that just opened.");
+    return;
+  }
+
+  startListening();
+}
+
+if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.type === "MIC_PERMISSION_GRANTED") {
+      micGrantedThisSession = true;
+      updateMicSettings("session");
+      showHint("Microphone ready. Speak your question.");
+      startListening();
+    }
+  });
+}
+
+/* ---------- Settings ---------- */
+
+function openSettings() {
+  els.apiInput.value = state.apiBase;
+  els.testResult.textContent = "";
+  els.testResult.className = "test-result";
+
+  if (micGrantedThisSession) {
+    updateMicSettings("session");
+  } else {
+    queryMicPermission().then(updateMicSettings);
+  }
+
+  if (typeof els.settingsDialog.showModal === "function") {
+    els.settingsDialog.showModal();
+  } else {
+    els.settingsDialog.setAttribute("open", "");
+  }
+  setTimeout(() => els.apiInput.focus(), 30);
+}
+
+function closeSettings() {
+  if (typeof els.settingsDialog.close === "function") {
+    els.settingsDialog.close();
+  } else {
+    els.settingsDialog.removeAttribute("open");
+  }
+}
+
+async function testConnectionFromSheet() {
+  const url = normalizeBase(els.apiInput.value);
+  els.testResult.className = "test-result";
+  els.testResult.textContent = "Testing…";
+
+  try {
+    const res = await fetchWithTimeout(`${url}/health`, {}, 4000);
+    if (res.ok) {
+      els.testResult.className = "test-result is-ok";
+      els.testResult.textContent = "Connected. The backend is reachable.";
+    } else {
+      els.testResult.className = "test-result is-fail";
+      els.testResult.textContent = `Server responded with HTTP ${res.status}.`;
+    }
+  } catch {
+    els.testResult.className = "test-result is-fail";
+    els.testResult.textContent = "Could not reach that URL.";
+  }
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  state.apiBase = normalizeBase(els.apiInput.value);
+  storageSet("apiBase", state.apiBase);
+  closeSettings();
+  await checkBackend();
+}
+
+/* ---------- Events ---------- */
+
+els.composer.addEventListener("submit", (event) => {
+  event.preventDefault();
+  sendMessage();
+});
+
+els.input.addEventListener("input", () => {
+  autoResize();
+  syncSend();
+});
+
+els.input.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
+  }
+});
+
+els.micBtn.addEventListener("click", toggleListening);
+els.micPermissionBtn?.addEventListener("click", () => {
+  openMicPermissionPage();
+});
+
+function newChat() {
+  if (state.busy) {
+    showHint("Wait for the current reply to finish.");
+    return;
+  }
+  state.history = [];
+  renderEmpty();
+  els.input.value = "";
+  autoResize();
+  syncSend();
+  setActivity("idle");
+}
+
+els.settingsBtn.addEventListener("click", openSettings);
+els.closeSettings.addEventListener("click", closeSettings);
+els.settingsForm.addEventListener("submit", saveSettings);
+els.testBtn.addEventListener("click", testConnectionFromSheet);
+
+els.dashboardBtn?.addEventListener("click", () => {
+  const next = state.view === "dashboard" ? "chat" : "dashboard";
+  setView(next);
+  if (next === "chat") els.input.focus({ preventScroll: true });
+});
+
+els.backToChatBtn?.addEventListener("click", () => {
+  setView("chat");
+  els.input.focus({ preventScroll: true });
+});
+
+els.dashSettingsBtn?.addEventListener("click", openSettings);
+
+els.dashNewChatBtn?.addEventListener("click", () => {
+  newChat();
+  setView("chat");
+  els.input.focus({ preventScroll: true });
+});
+
+els.backendCheckBtn?.addEventListener("click", checkBackend);
+
+els.minimizeBtn?.addEventListener("click", () => postToParent("MINIMIZE"));
+els.closeBtn?.addEventListener("click", () => postToParent("CLOSE"));
+
+els.settingsDialog.addEventListener("click", (event) => {
+  if (event.target === els.settingsDialog) closeSettings();
+});
+
+document.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    els.input.focus();
+  }
+
+  if (event.key === "Escape" && state.embedded && !els.settingsDialog.open) {
+    postToParent("CLOSE");
+  }
+});
+
+/* ---------- Init ---------- */
+
+async function init() {
+  const savedBase = await storageGet("apiBase", API_BASE_DEFAULT);
+  const savedMode = await storageGet("mode", "understand");
+
+  state.apiBase = normalizeBase(savedBase);
+  state.mode = MODES[savedMode] ? savedMode : "understand";
+
+  setMode(state.mode, { silent: true });
+  renderEmpty();
+  renderDashboard();
+  setView("chat");
+  syncSend();
+  autoResize();
+  checkBackend();
+
+  if (state.embedded) {
+    postToParent("PANEL_READY");
+  } else {
+    loadRepoFromActiveTab();
+  }
+
+  const permission = await queryMicPermission();
+  if (permission === "granted") {
+    micGrantedThisSession = true;
+    updateMicSettings("granted");
+  } else {
+    updateMicSettings(permission);
+  }
+}
+
+init();
