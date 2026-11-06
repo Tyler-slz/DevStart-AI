@@ -1,1 +1,36 @@
-// to be added soon
+{
+  "manifest_version": 3,
+  "name": "DevStart AI",
+  "version": "0.2.0",
+  "description": "AI-powered developer assistant that lives on the repository you are exploring.",
+  "permissions": ["sidePanel", "activeTab", "storage"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://github.com/*",
+    "https://api.github.com/*"
+  ],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open DevStart AI"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["content/github.js"],
+      "css": ["content/github.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["sidepanel/sidepanel.html", "assets/*"],
+      "matches": ["https://github.com/*"]
+    }
+  ]
+}
