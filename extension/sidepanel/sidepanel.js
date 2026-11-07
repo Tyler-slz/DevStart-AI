@@ -150,7 +150,10 @@ const state = {
   analysis: {
     status: "idle",
     repoName: "",
-    phase: "understand"
+    phase: "understand",
+    vulnerabilities: { critical: 0, high: 0, medium: 0, low: 0 },
+    prDraft: null,
+    recommendations: []
   },
   repo: {
     fullName: "",
@@ -396,14 +399,31 @@ function getProcessMode() {
   return analysisIsActive ? state.analysis.phase : state.mode;
 }
 
+function showScanCompleteToast() {
+  if (!els.scanCompleteToast) return;
+  els.scanCompleteToast.hidden = false;
+}
+
 function renderAnalysis() {
   const isRunning = state.analysis.status === "running";
   const isComplete = state.analysis.status === "complete";
-  const progress = isRunning ? 35 : isComplete ? 100 : 0;
+  const counts = state.analysis.vulnerabilities || { critical: 0, high: 0, medium: 0, low: 0 };
+  const cCrit = Number(counts.critical) || 0;
+  const cHigh = Number(counts.high) || 0;
+  const cMed = Number(counts.medium) || 0;
+  const cLow = Number(counts.low) || 0;
+  const totalIssues = cCrit + cHigh + cMed + cLow;
+
+  const penalty = cCrit * 25 + cHigh * 15 + cMed * 8 + cLow * 4;
+  const healthScore = Math.max(10, 100 - penalty);
+  const progress = isRunning ? 35 : isComplete ? healthScore : 0;
+
   const status = isRunning
     ? "Analyzing repository"
     : isComplete
-      ? "Analysis complete"
+      ? totalIssues > 0
+        ? `${totalIssues} issue${totalIssues === 1 ? "" : "s"} found`
+        : "Analysis complete"
       : "Ready to scan";
 
   if (els.dashAnalysisStatus) els.dashAnalysisStatus.textContent = status;
@@ -415,33 +435,43 @@ function renderAnalysis() {
       isRunning
         ? "Analysis is in progress"
         : isComplete
-          ? "Analysis complete"
+          ? `Analysis complete: ${progress}% code health (${totalIssues} issues)`
           : "Analysis has not started"
     );
   }
 
-  function showScanCompleteToast() {
-    if (!els.scanCompleteToast) return;
-    els.scanCompleteToast.hidden = false;
-  }
+  if (els.vulnerabilityTotal) els.vulnerabilityTotal.textContent = String(totalIssues);
+  if (els.criticalCount) els.criticalCount.textContent = String(cCrit);
+  if (els.highCount) els.highCount.textContent = String(cHigh);
+  if (els.mediumCount) els.mediumCount.textContent = String(cMed);
+  if (els.lowCount) els.lowCount.textContent = String(cLow);
+
   if (els.analysisFiles) {
     els.analysisFiles.textContent = isRunning
       ? "Inspecting repository"
       : isComplete
-        ? "Repository inspection finished"
+        ? totalIssues > 0
+          ? `${totalIssues} issue${totalIssues === 1 ? "" : "s"} detected in repository`
+          : "Repository inspection finished"
         : "No scan run";
   }
   if (els.analysisLastScan) {
     els.analysisLastScan.textContent = isRunning
       ? "Tracing bugs, risky paths, and security issues."
       : isComplete
-        ? "Insights were generated automatically from the inspection."
+        ? totalIssues > 0
+          ? `Code health score: ${healthScore}% — review findings in Chat or Auto Pull Request.`
+          : "Code health score: 100% — no vulnerabilities detected."
         : "Analysis starts automatically when a repository is detected.";
   }
 }
 
 async function requestAnalysis() {
   if (state.busy || !state.repo.fullName) return;
+
+  if (!state.usingBackend) {
+    await checkBackend();
+  }
 
   state.analysis.status = "running";
   state.analysis.phase = "understand";
@@ -464,26 +494,38 @@ async function requestAnalysis() {
 
   state.analysis.phase = "pr";
   state.analysis.status = "complete";
-  renderProgress();
-  showScanCompleteToast();
+  const vulns = state.analysis.vulnerabilities || {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0
+  };
+  const backendDraft = state.analysis.prDraft || {};
   const prDraft = {
     repo: state.repo.fullName,
-    title: `Harden ${state.repo.fullName}`,
-    summary: `Automatic inspection found improvement opportunities in ${state.repo.fullName}.`,
-    why: "Groups the highest-priority findings into one reviewable change before they reach production.",
-    scope: "Security fixes, validation improvements, and targeted refactors.",
-    vulnerabilities: {
-      critical: 0,
-      high: 0,
-      medium: 0,
-      low: 0
-    },
-    changes: [
-      "Repository inspection findings were reviewed automatically",
-      "Highest-priority security risks were grouped for review",
-      "Validation and targeted refactoring opportunities were identified"
-    ]
+    title: backendDraft.title || `Harden ${state.repo.fullName}`,
+    summary:
+      backendDraft.summary ||
+      `Automatic inspection found improvement opportunities in ${state.repo.fullName}.`,
+    why:
+      backendDraft.why ||
+      "Groups the highest-priority findings into one reviewable change before they reach production.",
+    scope:
+      backendDraft.scope ||
+      "Security fixes, validation improvements, and targeted refactors.",
+    vulnerabilities: vulns,
+    changes:
+      Array.isArray(backendDraft.changes) && backendDraft.changes.length
+        ? backendDraft.changes
+        : [
+            "Repository inspection findings were reviewed automatically",
+            "Highest-priority security risks were grouped for review",
+            "Validation and targeted refactoring opportunities were identified"
+          ]
   };
+  state.analysis.prDraft = prDraft;
+  renderProgress();
+  showScanCompleteToast();
   storageSet(`prDraft:${state.repo.fullName}`, prDraft);
   storageSet(`scanComplete:${state.repo.fullName}`, true);
   postToParent("PR_DRAFT_READY", prDraft);
@@ -698,16 +740,33 @@ function setView(view) {
   }
   if (isPr) {
     const repo = state.repo.fullName || "this repository";
-    if (els.autoPrTitle) els.autoPrTitle.textContent = `Harden ${repo}`;
-    if (els.autoPrSummary) els.autoPrSummary.textContent =
-      `Automatic inspection findings grouped into one reviewable change for ${repo}.`;
+    const draft = state.analysis.prDraft || {};
+    const recs = state.analysis.recommendations || [];
+    const counts = state.analysis.vulnerabilities || { critical: 0, high: 0, medium: 0, low: 0 };
+    const totalIssues =
+      (Number(counts.critical) || 0) +
+      (Number(counts.high) || 0) +
+      (Number(counts.medium) || 0) +
+      (Number(counts.low) || 0);
+
+    if (els.autoPrTitle) els.autoPrTitle.textContent = draft.title || `Harden ${repo}`;
+    if (els.autoPrSummary)
+      els.autoPrSummary.textContent =
+        draft.summary || `Automatic inspection findings grouped into one reviewable change for ${repo}.`;
+    if (els.autoPrWhy && draft.why) els.autoPrWhy.textContent = draft.why;
+
+    const uniqueFiles = Array.from(new Set(recs.map((r) => r.file).filter(Boolean)));
+    if (els.autoPrFiles) els.autoPrFiles.textContent = String(uniqueFiles.length || (totalIssues > 0 ? 1 : 0));
+    if (els.autoPrIssues) els.autoPrIssues.textContent = String(totalIssues);
+
     if (els.autoPrFileList) {
       els.autoPrFileList.innerHTML = "";
-      [
-        ["Added", "index.html", "file-added"],
-        ["Modified", "src/app.js", "file-modified"],
-        ["Deleted", "legacy/config.js", "file-deleted"]
-      ].forEach(([action, file, className]) => {
+      const fileEntries = uniqueFiles.length
+        ? uniqueFiles.map((file) => ["Modified", file, "file-modified"])
+        : [
+            ["Modified", "README.md", "file-modified"]
+          ];
+      fileEntries.forEach(([action, file, className]) => {
         const item = document.createElement("li");
         const badge = document.createElement("span");
         badge.className = `file-change ${className}`;
@@ -825,6 +884,9 @@ function addError(retryText) {
 /* ---------- Reply pipeline ---------- */
 
 async function getReply(text) {
+  if (!state.usingBackend) {
+    await checkBackend();
+  }
   if (state.usingBackend) {
     try {
       return await callBackend(text);
@@ -843,7 +905,8 @@ async function callBackend(message) {
     body: JSON.stringify({
       message,
       mode: state.mode,
-      history: state.history.slice(-8)
+      history: state.history.slice(-8),
+      repo: state.repo.fullName || undefined
     })
   });
 
@@ -852,6 +915,22 @@ async function callBackend(message) {
   const data = await res.json();
   const reply = data.reply ?? data.message ?? data.content ?? data.answer;
   if (!reply || typeof reply !== "string") throw new Error("Empty reply");
+
+  if (data.vulnerabilities && typeof data.vulnerabilities === "object") {
+    state.analysis.vulnerabilities = {
+      critical: Number(data.vulnerabilities.critical) || 0,
+      high: Number(data.vulnerabilities.high) || 0,
+      medium: Number(data.vulnerabilities.medium) || 0,
+      low: Number(data.vulnerabilities.low) || 0
+    };
+  }
+  if (data.pr_draft && typeof data.pr_draft === "object") {
+    state.analysis.prDraft = data.pr_draft;
+  }
+  if (Array.isArray(data.recommendations)) {
+    state.analysis.recommendations = data.recommendations;
+  }
+  renderAnalysis();
 
   const stage = typeof data.mode === "string" ? data.mode : data.stage;
   return { reply, mode: MODES[stage] ? stage : null };
@@ -1067,9 +1146,24 @@ function syncSend() {
 async function checkBackend() {
   setStatus("checking");
   try {
-    await fetchWithTimeout(`${state.apiBase}/health`, {}, 3500);
+    const res = await fetchWithTimeout(`${state.apiBase}/health`, {}, 3500);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     state.usingBackend = true;
   } catch {
+    if (state.apiBase !== API_BASE_DEFAULT) {
+      try {
+        const fallbackRes = await fetchWithTimeout(`${API_BASE_DEFAULT}/health`, {}, 3500);
+        if (fallbackRes.ok) {
+          state.apiBase = API_BASE_DEFAULT;
+          storageSet("apiBase", API_BASE_DEFAULT);
+          state.usingBackend = true;
+          setStatus("online");
+          return;
+        }
+      } catch {
+        /* local fallback also offline */
+      }
+    }
     state.usingBackend = false;
   }
   setStatus(state.usingBackend ? "online" : "offline");
