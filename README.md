@@ -24,7 +24,7 @@ It assists developers with project onboarding, code analysis, identifying potent
 | HTML, CSS, JavaScript | Chrome Extension Frontend |
 | Python | Backend Development |
 | FastAPI | Backend API |
-| Firebase | Authentication and Database |
+| Render | Backend hosting |
 | Gemini API | AI-Powered Code Analysis |
 | Semgrep | Static Code Analysis |
 | GitHub API | Repository Access and Pull Requests |
@@ -54,11 +54,6 @@ devstart-ai/
 │   ├── services/
 │   └── config/
 │
-├── firebase/               # Firebase Configuration
-│   ├── firestore.rules
-│   ├── firestore.indexes.json
-│   └── firebase.json
-│
 ├── docs/                   # Project Documentation
 ├── tests/                  # Testing
 │
@@ -80,7 +75,6 @@ Before setting up DevStart AI, make sure you have:
 - [Visual Studio Code](https://code.visualstudio.com/)
 - [Python](https://www.python.org/downloads/)
 - [Git](https://git-scm.com/)
-- A [Firebase](https://firebase.google.com/) project
 - A [Google AI Studio](https://aistudio.google.com/) API key
 - A GitHub account
 
@@ -159,14 +153,13 @@ Create a `.env` file inside the `backend/` directory:
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key
-FIREBASE_CREDENTIALS=your_firebase_credentials
 GITHUB_TOKEN=your_github_token
 ```
 
 **Important:**
 - Never commit `.env` files or private credentials.
-- Add `.env` and service-account files to `.gitignore`.
 - Never expose secret API keys in the Chrome extension's JavaScript files.
+- Analysis results are kept in memory only and are not persisted by the backend.
 
 ---
 

@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from config.firebase_config import init_firebase
 from config.settings import settings
 from routes import analysis_routes, chat_routes, github_routes
 
@@ -30,12 +29,6 @@ app.include_router(analysis_routes.router)
 app.include_router(chat_routes.router)
 
 
-@app.on_event("startup")
-def on_startup():
-    """Initialize optional integrations such as Firebase Admin on startup."""
-    init_firebase()
-
-
 @app.get("/")
 def health_check():
     """Root health check endpoint."""
@@ -56,9 +49,5 @@ def extension_health_check():
         ),
         "github_token_configured": bool(
             settings.GITHUB_TOKEN and settings.GITHUB_TOKEN != "your_github_token"
-        ),
-        "firebase_configured": bool(
-            settings.FIREBASE_CREDENTIALS
-            and settings.FIREBASE_CREDENTIALS != "your_firebase_credentials"
         ),
     }

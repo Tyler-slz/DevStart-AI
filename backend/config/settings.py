@@ -18,8 +18,6 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "").strip()
-    FIREBASE_CREDENTIALS: str = os.getenv("FIREBASE_CREDENTIALS", "").strip()
-
     # GitHub API Configuration
     GITHUB_API_BASE: str = "https://api.github.com"
     GITHUB_TIMEOUT: int = int(os.getenv("GITHUB_TIMEOUT", "15"))
@@ -31,4 +29,3 @@ class Settings:
 
 
 settings = Settings()
-

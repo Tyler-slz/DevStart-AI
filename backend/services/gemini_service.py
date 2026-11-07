@@ -480,7 +480,7 @@ Respond helpfully and concisely (2-5 sentences), referencing specific files in b
 
     # Generic fallback when no repo is mentioned and no Gemini key is configured
     default_replies = {
-        "understand": "This project splits into a `Chrome extension`, a `FastAPI backend`, and `Firebase` configuration. Open a GitHub repository tab or include `owner/repo` so I can map its exact files.",
+        "understand": "This project splits into a `Chrome extension` and a `FastAPI backend`. Open a GitHub repository tab or include `owner/repo` so I can map its exact files.",
         "onboard": "Create a virtual environment, install `backend/requirements.txt`, configure `GEMINI_API_KEY` and `GITHUB_TOKEN` in `backend/.env`, and start the server with `uvicorn main:app --reload`.",
         "analyze": "Provide a repository name (`owner/repo`) or code snippet and I will run `Semgrep` static checks alongside `Gemini` analysis, tying every finding to its file and line number.",
         "suggest": "I can generate concrete before/after code replacements for any flagged file so you can review and edit them before creating a pull request.",
@@ -490,4 +490,3 @@ Respond helpfully and concisely (2-5 sentences), referencing specific files in b
         "reply": default_replies.get(next_mode, default_replies["understand"]),
         "mode": next_mode,
     }
-

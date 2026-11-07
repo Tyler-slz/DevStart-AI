@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from config.firebase_config import save_analysis_record
 from services.gemini_service import analyze_code_with_ai, generate_onboarding_guide
 from services.github_service import fetch_repo_context, parse_repo_identifier
 from services.security_utils import is_sensitive_path, redact_secrets
@@ -102,9 +101,6 @@ def analyze_code(
         repo_name=repo_name,
     )
 
-    if repo_name != "local-snippet":
-        save_analysis_record(repo_name, "code_analysis", ai_results)
-
     return {
         "status": "ok",
         "repo": repo_name,
@@ -163,7 +159,6 @@ def analyze_repository(
         "analysis": code_analysis,
         "pr_draft": code_analysis.get("pr_draft"),
     }
-    save_analysis_record(full_name, "full_scan", response_payload)
     return response_payload
 
 
@@ -190,7 +185,6 @@ def analyze_onboarding(
         raise HTTPException(status_code=502, detail=f"GitHub API error: {exc}") from exc
 
     onboarding = generate_onboarding_guide(context)
-    save_analysis_record(full_name, "onboarding", onboarding)
     return {
         "status": "ok",
         "repo": full_name,

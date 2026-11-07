@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from config.firebase_config import save_analysis_record
 from services.github_service import (
     create_pull_request_workflow,
     fetch_repo_context,
@@ -127,7 +126,6 @@ def create_pull_request(
             approved=payload.approved,
             token=token,
         )
-        save_analysis_record(f"{owner}/{repo_name}", "last_pull_request", result)
         return result
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

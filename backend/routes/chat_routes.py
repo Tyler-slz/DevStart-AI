@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
 
-from config.firebase_config import save_analysis_record
 from services.gemini_service import chat_with_assistant
 from services.github_service import fetch_repo_context, parse_repo_identifier
 from services.semgrep_service import run_static_analysis
@@ -165,18 +164,6 @@ def chat_endpoint(
                 int(vulnerabilities.get(sev, 0)), int(ai_vulns.get(sev, 0))
             )
         pr_draft["vulnerabilities"] = vulnerabilities
-
-    if repo_tuple:
-        save_analysis_record(
-            full_name,
-            "last_chat",
-            {
-                "message": payload.message,
-                "reply": result["reply"],
-                "mode": result["mode"],
-                "vulnerabilities": vulnerabilities,
-            },
-        )
 
     return {
         "reply": result["reply"],

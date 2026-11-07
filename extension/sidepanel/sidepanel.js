@@ -4,7 +4,7 @@
  *   1. Chrome side panel.
  *   2. A floating iframe injected on GitHub repository pages (?embed=1).
  *
- * Backend contract (FastAPI, default http://127.0.0.1:8000):
+ * Backend contract (FastAPI, default https://devstart-ai.onrender.com):
  *   GET  /health        -> any 2xx means reachable
  *   POST /api/chat      -> { "reply": "...", "mode"?: "insights" }
  *        body: { message: string, mode: string, history: [{ role, content }] }
@@ -15,7 +15,7 @@
  * workflow the assistant is working on. The assistant moves it, not the user.
  */
 
-const API_BASE_DEFAULT = "http://127.0.0.1:8000";
+const API_BASE_DEFAULT = "https://devstart-ai.onrender.com";
 const REQUEST_TIMEOUT = 20000;
 
 const MODES = {
