@@ -1,1 +1,7 @@
-# to be added soon
+fastapi>=0.115.0,<0.142.0
+uvicorn>=0.30.0
+firebase-admin>=6.5.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+google-generativeai>=0.8.0
+semgrep==1.184.0
